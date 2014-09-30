@@ -3,4 +3,4 @@
 *.npz
 *.gz
 *.bz2
-*.ipynb_checkpoints/*
+*.ipynb_checkpoints*
