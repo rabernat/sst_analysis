@@ -20,7 +20,7 @@ class POPFile(object):
             self.z_w_bot = nc.variables['z_w_bop'][:]
             self.Nz = len(self.z_t)
             kmt = p.nc.variables['KMT'][:]
-            self.mask3d = np.zeros((self.Nz, self.Ny, self.Nx)), dtype='b')
+            self.mask3d = np.zeros((self.Nz, self.Ny, self.Nx), dtype='b')
             Nz = mask3d.shape[0]
             for k in range(Nz):
                 self.mask3d[k] = (kmt<=k)
