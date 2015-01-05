@@ -36,7 +36,7 @@ class POPFile(object):
                  self.nc.variables['HUW'][:])
         tarea = self.nc.variables['TAREA'][:]
         self.tarea = tarea
-	    tarea_r = np.ma.masked_invalid(tarea**-1).filled(0.)
+        tarea_r = np.ma.masked_invalid(tarea**-1).filled(0.)
         dtn = work1*tarea_r
         dts = np.roll(work1,-1,axis=0)*tarea_r
         
