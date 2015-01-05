@@ -4,12 +4,12 @@ import netCDF4
 
 class POPFile(object):
     
-    def __init__(self, fname, hmax=None, hconst=None, pref=0., ah=-3e17, is3d=False):
+    def __init__(self, fname, ah=-3e17, is3d=False):
         """Wrapper for POP model netCDF files"""
         self.nc = netCDF4.Dataset(fname)
-        self.Ny, self.Nx = self.nc.variables['TAREA'].shape
-        self.pref = pref        
-
+        self.Ny, self.Nx = self.nc.variables['TAREA'].shape     
+        self._ah = ah
+        
         # mask
         self.mask = self.nc.variables['KMT'][:] <= 1
 
@@ -24,14 +24,10 @@ class POPFile(object):
             Nz = mask3d.shape[0]
             for k in range(Nz):
                 self.mask3d[k] = (kmt<=k)
-        
-        self._ah = ah
-
 
     def mask_field(self, T):
         """Apply mask to tracer field T"""
         return np.ma.masked_array(T, self.mask)
-
         
     def initialize_gradient_operator(self):
         """Needs to be called before calculating gradients"""
@@ -40,7 +36,7 @@ class POPFile(object):
                  self.nc.variables['HUW'][:])
         tarea = self.nc.variables['TAREA'][:]
         self.tarea = tarea
-	tarea_r = np.ma.masked_invalid(tarea**-1).filled(0.)
+	    tarea_r = np.ma.masked_invalid(tarea**-1).filled(0.)
         dtn = work1*tarea_r
         dts = np.roll(work1,-1,axis=0)*tarea_r
         
