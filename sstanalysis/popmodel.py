@@ -1,6 +1,6 @@
 import numpy as np
 import netCDF4
-
+from warnings import warn
 
 class POPFile(object):
     
@@ -93,26 +93,65 @@ class POPFile(object):
                    +(dTy**2 + np.roll(dTy,1,axis=1)**2) * self._dytr**2
         )        
         
-    def biharmonic_tendency(self, T):
-        """Caclulate tendency due to biharmonic diffusion of T."""
-        d2tk = self._ahf * self.laplacian(T)
-        return self._ah * self.laplacian(d2tk)
+    def power_spectrum_2d(self, varname='SST', lonrange=(180,200), latrange=(30,50)):
+        """Calculate a two-dimensional power spectrum of netcdf variable 'varname'
+           in the box defined by lonrange and latrange.
+        """
+    
+        lon = self.nc.variables['TLONG'][:]
+        lat = self.nc.variables['TLAT'][:]
         
-    def horizontal_flux_divergence(self, uflux, vflux):
-        """Designed to be used with diagnostics such as DIFE_*, DIFN_*.
-        Returns a pure tendency."""
-        workx = 0.5 * uflux * self._dyu
-        worky = 0.5 * vflux * self._dxu
-        work1 = workx + np.roll(workx, 1, axis=-1)
-        work1 -= np.roll(work1, 1, axis=-2)
-        work2 = worky + np.roll(worky, 1, axis=-2)
-        work2 -= np.roll(work2, 1, axis=-1)
-        res = work1 + work2
-        if self.is3d and (res.ndim>2):
-            if res.shape[-3]==self.Nz:
-                return np.ma.masked_array(res, self.mask3d).filled(0.)
-        else:
-            return np.ma.masked_array(res, self.mask).filled(0.)
-    
-    
+        # step 1: figure out the box indices
+        lonmask = (lon >= lonrange[0]) & (lon < lonrange[1])
+        latmask = (lat >= latrange[0]) & (lat < latrange[1])
+        boxidx = lonmask & latmask # this won't necessarily be square
+        irange = np.where(boxidx.sum(axis=0))[0]
+        imin, imax = irange.min(), irange.max()
+        jrange = np.where(boxidx.sum(axis=1))[0]
+        jmin, jmax = jrange.min(), jrange.max()
+        Nx = imax - imin
+        Ny = jmax - jmin
+
+        # step 2: load the data
+        T = self.nc.variables[varname][..., jmin:jmax, imin:imax]
+        
+        # step 3: figure out if there is too much land in the box
+        MAX_LAND = 0.01 # only allow up to 1% land
+        region_mask = self.mask[jmin:jmax, imin:imax]
+        land_fraction = region_mask.sum().astype('f8') / (Ny*Nx)
+        if land_fraction==0.:
+            # no problem
+            pass
+        elif land_fraction >= MAX_LAND:
+            raise ValueError('The sector has too much land. land_fraction = ' + str(land_fraction))
+        else:    
+            # do some interpolation
+            errstr = 'The sector has land (land_fraction=%g) but we are interpolating it out.' % land_fraction
+            warn(errstr)
+            # have to figure out how to actually do it
+            # Ti = ...
+        
+        # step 4: figure out FFT parameters (k, l, etc.) and set up result variable
+
+        ##########################################
+        ### Start looping through each time step #
+        ##########################################
+        Nt = T.shape[0]
+        for n in range(Nt):
+            pass    
+            # step 5: interpolate the missing data (only of necessary)
+        
+            # step 6: detrend the data in two dimensions
+        
+            # step 7: window the data
+        
+            # step 8: do the FFT for each timestep and aggregate the results
+        
+        
+        # step 8: return the results
+            
+        
+        
+        
+        
 
