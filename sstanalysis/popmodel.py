@@ -26,6 +26,12 @@ class POPFile(object):
                 self.mask3d[k] = (kmt<=k)
         
         self._ah = ah
+
+
+    def mask_field(self, T):
+        """Apply mask to tracer field T"""
+        return np.ma.masked_array(T, self.mask)
+
         
     def initialize_gradient_operator(self):
         """Needs to be called before calculating gradients"""
@@ -33,7 +39,8 @@ class POPFile(object):
         work1 = (self.nc.variables['HTN'][:] /
                  self.nc.variables['HUW'][:])
         tarea = self.nc.variables['TAREA'][:]
-        tarea_r = np.ma.masked_invalid(tarea**-1).filled(0.)
+        self.tarea = tarea
+	tarea_r = np.ma.masked_invalid(tarea**-1).filled(0.)
         dtn = work1*tarea_r
         dts = np.roll(work1,-1,axis=0)*tarea_r
         

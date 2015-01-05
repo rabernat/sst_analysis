@@ -14,7 +14,7 @@ if __name__ == "__main__":
       author='Ryan Abernathey',
       author_email='rpa@ldeo.columbia.edu',
       license='MIT',
-      packages=['popanalysis'],
+      packages=['sstanalysis'],
       install_requires=[
           'numpy','netCDF4'
       ],
