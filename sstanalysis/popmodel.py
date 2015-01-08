@@ -1,6 +1,11 @@
 import numpy as np
 import netCDF4
 from warnings import warn
+from scipy import linalg as lin
+from scipy import signal as sig
+from scipy import fftpack as fft
+from scipy import interpolate as naiso
+import gfd
 
 class POPFile(object):
     
@@ -93,17 +98,17 @@ class POPFile(object):
                    +(dTy**2 + np.roll(dTy,1,axis=1)**2) * self._dytr**2
         )        
         
-    def power_spectrum_2d(self, varname='SST', lonrange=(180,200), latrange=(30,50)):
+    def power_spectrum_2d(self, T, lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000):
         """Calculate a two-dimensional power spectrum of netcdf variable 'varname'
            in the box defined by lonrange and latrange.
         """
     
-        lon = self.nc.variables['TLONG'][:]
-        lat = self.nc.variables['TLAT'][:]
+        tlon = np.roll(self.nc.variables['TLONG'][:], roll)
+        tlat = np.roll(self.nc.variables['TLAT'][:], roll)
         
         # step 1: figure out the box indices
-        lonmask = (lon >= lonrange[0]) & (lon < lonrange[1])
-        latmask = (lat >= latrange[0]) & (lat < latrange[1])
+        lonmask = (tlon >= lonrange[0]) & (tlon < lonrange[1])
+        latmask = (tlat >= latrange[0]) & (tlat < latrange[1])
         boxidx = lonmask & latmask # this won't necessarily be square
         irange = np.where(boxidx.sum(axis=0))[0]
         imin, imax = irange.min(), irange.max()
@@ -111,13 +116,16 @@ class POPFile(object):
         jmin, jmax = jrange.min(), jrange.max()
         Nx = imax - imin
         Ny = jmax - jmin
+        lon = tlon[jmin:jmax, imin:imax]
+        lat = tlat[jmin:jmax, imin:imax]
 
         # step 2: load the data
-        T = self.nc.variables[varname][..., jmin:jmax, imin:imax]
+        #T = np.roll(self.nc.variables[varname],-1000)[..., jmin:jmax, imin:imax]
+        T = np.roll(T, roll)[..., jmin:jmax, imin:imax]
         
         # step 3: figure out if there is too much land in the box
-        MAX_LAND = 0.01 # only allow up to 1% land
-        region_mask = self.mask[jmin:jmax, imin:imax]
+        MAX_LAND = 0.01 # only allow up to 1% of land
+        region_mask = np.roll(self.mask, roll)[jmin:jmax, imin:imax]
         land_fraction = region_mask.sum().astype('f8') / (Ny*Nx)
         if land_fraction==0.:
             # no problem
@@ -132,24 +140,73 @@ class POPFile(object):
             # Ti = ...
         
         # step 4: figure out FFT parameters (k, l, etc.) and set up result variable
+        dlon = lon[np.round(np.floor(lon.shape[0]*0.5)), np.round(
+                     np.floor(lon.shape[1]*0.5))+1]-lon[np.round(
+                     np.floor(lon.shape[0]*0.5)), np.round(np.floor(lon.shape[1]*0.5))]
+        dlat = lat[np.round(np.floor(lat.shape[0]*0.5))+1, np.round(
+                     np.floor(lat.shape[1]*0.5))]-lat[np.round(
+                     np.floor(lat.shape[0]*0.5)), np.round(np.floor(lat.shape[1]*0.5))]
+
+        # Spatial step
+        dx = gfd.A*np.cos(np.pi/180*lat[np.round(
+                     np.floor(lat.shape[0]*0.5)),np.round(
+                     np.floor(lat.shape[1]*0.5))])*(np.pi/180.*dlon)
+        dy = gfd.A*(np.pi/180.*dlat)
+        
+        # Wavenumber step
+        k = fft.fftshift(fft.fftfreq(Nx, dx))
+        l = fft.fftshift(fft.fftfreq(Ny, dy))
 
         ##########################################
         ### Start looping through each time step #
         ##########################################
         Nt = T.shape[0]
+        PSD_sum = np.zeros((Ny,Nx))
         for n in range(Nt):
-            pass    
+            Ti = np.ma.masked_array(T[n], region_mask)
+            
             # step 5: interpolate the missing data (only of necessary)
+            if land_fraction>0. and land_fraction<MAX_LAND:
+                x = np.arange(0,Nx)
+                y = np.arange(0,Ny)
+                X,Y = np.meshgrid(x,y)
+                Zr = Ti.ravel()
+                Xr = np.ma.masked_array(X.ravel(), Zr.mask)
+                Yr = np.ma.masked_array(Y.ravel(), Zr.mask)
+                Xm =np.ma.masked_array( Xr.data, ~Xr.mask ).compressed()
+                Ym =np.ma.masked_array( Yr.data, ~Yr.mask ).compressed()
+                Zm = griddata(np.array([Xr.compressed(), Yr.compressed()]).T, 
+                                        Zr.compressed(), np.array([Xm,Ym]).T, method='nearest')
+                Znew = Zr.data
+                Znew[Zr.mask] = Zm
+                Znew.shape = Z.shape
+                Ti = Znew
         
             # step 6: detrend the data in two dimensions
-        
+            d_obs = np.reshape(Ti, (Nx*Ny,1))
+            G = np.ones((Ny*Nx,3))
+            for i in range(Ny):
+                G[Nx*i:Nx*i+Nx, 0] = i+1
+                G[Nx*i:Nx*i+Nx, 1] = np.arange(1, Nx+1)    
+            m_est = np.dot(np.dot(lin.inv(np.dot(G.T, G)), G.T), d_obs)
+            d_est = np.dot(G, m_est)
+            Lin_trend = np.reshape(d_est, (Ny, Nx))
+            Ti -= Lin_trend
+
             # step 7: window the data
-        
+            # Hanning window
+            windowx = sig.hann(Nx)
+            windowy = sig.hann(Ny)
+            window = windowx*windowy[:,np.newaxis] 
+            Ti *= window
+
             # step 8: do the FFT for each timestep and aggregate the results
+            Tif = fft.fftshift(fft.fft2(Ti))
+            PSD_sum += 2.*np.real(Tif*np.conj(Tif))
         
+        # step 9: return the results
+        return Nt, Nx, Ny, k, l, PSD_sum
         
-        # step 8: return the results
-            
         
         
         
