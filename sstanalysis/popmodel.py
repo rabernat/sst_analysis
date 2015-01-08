@@ -116,7 +116,7 @@ class POPFile(object):
         T = self.nc.variables[varname][..., jmin:jmax, imin:imax]
         
         # step 3: figure out if there is too much land in the box
-        MAX_LAND = 0.01 # only allow up to 1% land
+        MAX_LAND = 0.01 # only allow up to 1% of land
         region_mask = self.mask[jmin:jmax, imin:imax]
         land_fraction = region_mask.sum().astype('f8') / (Ny*Nx)
         if land_fraction==0.:
@@ -138,7 +138,8 @@ class POPFile(object):
         ##########################################
         Nt = T.shape[0]
         for n in range(Nt):
-            pass    
+            Ti = T[n]
+            
             # step 5: interpolate the missing data (only of necessary)
         
             # step 6: detrend the data in two dimensions
@@ -148,7 +149,7 @@ class POPFile(object):
             # step 8: do the FFT for each timestep and aggregate the results
         
         
-        # step 8: return the results
+        # step 9: return the results
             
         
         
