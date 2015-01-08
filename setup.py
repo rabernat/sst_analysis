@@ -19,4 +19,5 @@ if __name__ == "__main__":
           'numpy','netCDF4'
       ],
       test_suite = 'nose.collector',
+      tests_require = ['nose'],
       zip_safe=False)
