@@ -155,6 +155,7 @@ class POPFile(object):
         
         # Wavenumber step
         k = fft.fftshift(fft.fftfreq(Nx, dx))
+
         l = fft.fftshift(fft.fftfreq(Ny, dy))
 
         ##########################################
@@ -165,7 +166,7 @@ class POPFile(object):
         for n in range(Nt):
             Ti = np.ma.masked_array(T[n], region_mask)
             
-            # step 5: interpolate the missing data (only of necessary)
+            # step 5: interpolate the missing data (only if necessary)
             if land_fraction>0. and land_fraction<MAX_LAND:
                 x = np.arange(0,Nx)
                 y = np.arange(0,Ny)
@@ -173,8 +174,8 @@ class POPFile(object):
                 Zr = Ti.ravel()
                 Xr = np.ma.masked_array(X.ravel(), Zr.mask)
                 Yr = np.ma.masked_array(Y.ravel(), Zr.mask)
-                Xm =np.ma.masked_array( Xr.data, ~Xr.mask ).compressed()
-                Ym =np.ma.masked_array( Yr.data, ~Yr.mask ).compressed()
+                Xm = np.ma.masked_array( Xr.data, ~Xr.mask ).compressed()
+                Ym = np.ma.masked_array( Yr.data, ~Yr.mask ).compressed()
                 Zm = griddata(np.array([Xr.compressed(), Yr.compressed()]).T, 
                                         Zr.compressed(), np.array([Xm,Ym]).T, method='nearest')
                 Znew = Zr.data
@@ -182,7 +183,7 @@ class POPFile(object):
                 Znew.shape = Z.shape
                 Ti = Znew
         
-            # step 6: detrend the data in two dimensions
+            # step 6: detrend the data in two dimensions (least squares plane fit)
             d_obs = np.reshape(Ti, (Nx*Ny,1))
             G = np.ones((Ny*Nx,3))
             for i in range(Ny):
