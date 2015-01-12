@@ -11,11 +11,8 @@ except RuntimeError:
     print base_dir + fname
     p = POPFile(base_dir + fname)    
     
-# load variable
-T = p.nc.variables['SST']
-
 # compute variables needed for FFT
-Nt, Nx, Ny, k, l, PSD_sum = p.power_spectrum_2d(T)
+Nt, Nx, Ny, k, l, PSD_sum = p.power_spectrum_2d()
 
 # take time mean
 PSD_2d = PSD_sum/Nt
