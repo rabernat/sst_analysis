@@ -98,7 +98,7 @@ class POPFile(object):
                    +(dTy**2 + np.roll(dTy,1,axis=1)**2) * self._dytr**2
         )        
         
-    def power_spectrum_2d(self, T, lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000):
+    def power_spectrum_2d(self, varname='SST', lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000):
         """Calculate a two-dimensional power spectrum of netcdf variable 'varname'
            in the box defined by lonrange and latrange.
         """
@@ -121,7 +121,7 @@ class POPFile(object):
 
         # step 2: load the data
         #T = np.roll(self.nc.variables[varname],-1000)[..., jmin:jmax, imin:imax]
-        T = np.roll(T, roll)[..., jmin:jmax, imin:imax]
+        T = np.roll(self.nc.variables[varname][:], roll)[..., jmin:jmax, imin:imax]
         
         # step 3: figure out if there is too much land in the box
         MAX_LAND = 0.01 # only allow up to 1% of land
