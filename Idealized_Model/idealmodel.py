@@ -11,7 +11,7 @@ import gfd
 class IDEALFile(object):
     
     def __init__(self, fname):
-        """Wrapper for POP model netCDF files"""
+        """Wrapper for Idealized model matlab files"""
         self.mat = io.loadmat(fname)
         self.Ny, self.Nx = self.mat['bC'].shape     
         #self._ah = ah
@@ -108,12 +108,11 @@ class IDEALFile(object):
         #T = np.roll(self.nc.variables[varname],-1000)[..., jmin:jmax, imin:imax]
         T = self.mat[varname][:]
         Ny, Nx = T.shape
-        dx = 1e3
-        dy = 1e3
+        dx = 1e0
+        dy = 1e0
 
         # Wavenumber step
         k = fft.fftshift(fft.fftfreq(Nx, dx))
-
         l = fft.fftshift(fft.fftfreq(Ny, dy))
 
         ##########################################
@@ -124,7 +123,7 @@ class IDEALFile(object):
         #for n in range(Nt):
         Ti = T.copy()
             
-        # step 2: detrend the data in two dimensions (least squares plane fit)
+        # step 2: detrend the data in three dimensions (least squares plane fit)
         if detre:
             print 'Detrending Data'
             d_obs = np.reshape(Ti, (Nx*Ny,1))
@@ -162,14 +161,19 @@ class IDEALFile(object):
         # step 6: return the results
         return nbins, Nx, Ny, k, l, PSD_2d, Ki, isotropic_spectrum[1:], area[1:]
 
-    def structure_function(self, varname='bT', ndel=8, detre=False, windw=False):
-        """Calculate a two-dimensional power spectrum of netcdf variable 'varname'
+    def structure_function(self, varname='bT', q=2, detre=False, windw=False):
+        """Calculate a structure function of Matlab variable 'varname'
            in the box defined by lonrange and latrange.
         """        
 
         # load data
         T = self.mat[varname][:]
+
+        # define variables
         Ny, Nx = T.shape
+        n = np.arange(0,np.log2(Nx/2), dtype='i4')
+        ndel = len(n)
+        L = 2**n
         Hi = np.zeros(ndel)
         Hj = np.zeros(ndel)
         sumcounti = np.zeros(ndel)
@@ -199,15 +203,39 @@ class IDEALFile(object):
 
         # Difference with 2^m gridpoints in between
         for m in range(ndel):
-            dSSTi = np.ma.masked_array((np.absolute(Ti[:,2**m:] - Ti[:,:-2**m]))**2) # .filled(0.)
-            dSSTj = np.ma.masked_array((np.absolute(Ti[2**m:] - Ti[:-2**m]))**2) # .filled(0.)
-            counti = (~dSSTi.mask).astype('i4')
-            countj = (~dSSTj.mask).astype('i4')
-            sumcounti[m] = np.sum(counti)
-            sumcountj[m] = np.sum(countj)
-            Hi[m] = np.sum(np.absolute(dSSTi))/sumcounti[m]
-            Hj[m] = np.sum(np.absolute(dSSTj))/sumcountj[m]
+            #dSSTi = np.zeros((Ny,Nx))
+            #dSSTj = np.zeros((Ny,Nx))
+            # Take the difference by displacing the matrices along each axis 
+            #dSSTi = np.ma.masked_array((np.absolute(Ti[:,2**m:] - Ti[:,:-2**m]))**2) # .filled(0.)
+            #dSSTj = np.ma.masked_array((np.absolute(Ti[2**m:] - Ti[:-2**m]))**2) # .filled(0.)
+            # Take the difference by specifying the grid spacing
+            #for i in range(Nx):
+            #    if i+2**m<Nx:
+            #        dSSTi[:,:Nx-2**m] = np.ma.masked_array(
+            #                               (np.absolute(Ti[:,2**m:] - Ti[:,:-2**m]))**q)
+            #    else:
+            #        dSSTi[:,i] = np.ma.masked_array(
+            #                               (np.absolute(Ti[:,i+2**m-Nx] - Ti[:,i]))**q)
+            #for j in range(Ny):    
+            #    if j+2**m<Ny:
+            #        dSSTj[:Ny-2**m] = np.ma.masked_array(
+            #                               (np.absolute(Ti[2**m:] - Ti[:-2**m]))**q)
+            #    else:
+            #        dSSTj[j,:] = np.ma.masked_array(
+            #                               (np.absolute(Ti[j+2**m-Ny,:] - Ti[j,:]))**q)
+            dSSTi = np.abs(Ti - np.roll(Ti,2**m,axis=1))**q
+            dSSTj = np.abs(Ti - np.roll(Ti,2**m,axis=0))**q
+            #counti = (~dSSTi.mask).astype('i4')
+            #countj = (~dSSTj.mask).astype('i4'
+            #sumcounti[m] = np.sum(counti)
+            #sumcountj[m] = np.sum(countj)
+            #Hi[m] = np.sum(np.absolute(dSSTi))/sumcounti[m]
+            #Hj[m] = np.sum(np.absolute(dSSTj))/sumcountj[m]
+            #Hi[m] = np.sum(dSSTi)/Ny
+            #Hj[m] = np.sum(dSSTj)/Nx
+            Hi[m] = dSSTi.mean()
+            Hj[m] = dSSTj.mean()
     
-        return ndel, Hi, Hj
+        return L, Hi, Hj
         
 
