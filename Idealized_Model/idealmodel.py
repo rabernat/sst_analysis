@@ -161,7 +161,7 @@ class IDEALFile(object):
         # step 6: return the results
         return nbins, Nx, Ny, k, l, PSD_2d, Ki, isotropic_spectrum[1:], area[1:]
 
-    def structure_function(self, varname='bT', q=2, detre=False, windw=False):
+    def structure_function(self, varname='bT', q=2, detre=False, windw=False, iso=False):
         """Calculate a structure function of Matlab variable 'varname'
            in the box defined by lonrange and latrange.
         """        
@@ -202,40 +202,59 @@ class IDEALFile(object):
             Ti *= window
 
         # Difference with 2^m gridpoints in between
-        for m in range(ndel):
-            #dSSTi = np.zeros((Ny,Nx))
-            #dSSTj = np.zeros((Ny,Nx))
-            # Take the difference by displacing the matrices along each axis 
-            #dSSTi = np.ma.masked_array((np.absolute(Ti[:,2**m:] - Ti[:,:-2**m]))**2) # .filled(0.)
-            #dSSTj = np.ma.masked_array((np.absolute(Ti[2**m:] - Ti[:-2**m]))**2) # .filled(0.)
-            # Take the difference by specifying the grid spacing
-            #for i in range(Nx):
-            #    if i+2**m<Nx:
-            #        dSSTi[:,:Nx-2**m] = np.ma.masked_array(
-            #                               (np.absolute(Ti[:,2**m:] - Ti[:,:-2**m]))**q)
-            #    else:
-            #        dSSTi[:,i] = np.ma.masked_array(
-            #                               (np.absolute(Ti[:,i+2**m-Nx] - Ti[:,i]))**q)
-            #for j in range(Ny):    
-            #    if j+2**m<Ny:
-            #        dSSTj[:Ny-2**m] = np.ma.masked_array(
-            #                               (np.absolute(Ti[2**m:] - Ti[:-2**m]))**q)
-            #    else:
-            #        dSSTj[j,:] = np.ma.masked_array(
-            #                               (np.absolute(Ti[j+2**m-Ny,:] - Ti[j,:]))**q)
-            dSSTi = np.abs(Ti - np.roll(Ti,2**m,axis=1))**q
-            dSSTj = np.abs(Ti - np.roll(Ti,2**m,axis=0))**q
-            #counti = (~dSSTi.mask).astype('i4')
-            #countj = (~dSSTj.mask).astype('i4'
-            #sumcounti[m] = np.sum(counti)
-            #sumcountj[m] = np.sum(countj)
-            #Hi[m] = np.sum(np.absolute(dSSTi))/sumcounti[m]
-            #Hj[m] = np.sum(np.absolute(dSSTj))/sumcountj[m]
-            #Hi[m] = np.sum(dSSTi)/Ny
-            #Hj[m] = np.sum(dSSTj)/Nx
-            Hi[m] = dSSTi.mean()
-            Hj[m] = dSSTj.mean()
+        if iso:
+        # Calculate structure functions isotropically
+            print 'Isotropic Structure Function'
+            angle = np.arange(0,2.*np.pi,np.pi/180.)
+            radi = np.arange(0,Nx/2,1)
+            ang_index = len(angle)
+            rad_index = len(radi)
+            polar_coodx = np.zeros((ang_index,rad_index))
+            polar_coody = np.zeros_like(polar_coodx)
+            for j in range(ang_index):
+                for i in range(rad_index):
+                    polar_coodx[j,i] = radi[j,i]*np.cos(angle[j,i])
+                    polar_coody[j,i] = radi[j,i]*np.sin(angle[j,i])
+            Sq = np.zeros((ang_index/2,Nx))
+            
+        else:
+        # Calculate structure functions along each x-y axis
+            print 'Anisotropic Structure Function'
+            for m in range(ndel):
+                #dSSTi = np.zeros((Ny,Nx))
+                #dSSTj = np.zeros((Ny,Nx))
+                # Take the difference by displacing the matrices along each axis 
+                #dSSTi = np.ma.masked_array((np.absolute(Ti[:,2**m:] - Ti[:,:-2**m]))**2) # .filled(0.)
+                #dSSTj = np.ma.masked_array((np.absolute(Ti[2**m:] - Ti[:-2**m]))**2) # .filled(0.)
+                # Take the difference by specifying the grid spacing
+                #for i in range(Nx):
+                #    if i+2**m<Nx:
+                #        dSSTi[:,:Nx-2**m] = np.ma.masked_array(
+                #                               (np.absolute(Ti[:,2**m:] - Ti[:,:-2**m]))**q)
+                #    else:
+                #        dSSTi[:,i] = np.ma.masked_array(
+                #                               (np.absolute(Ti[:,i+2**m-Nx] - Ti[:,i]))**q)
+                #for j in range(Ny):    
+                #    if j+2**m<Ny:
+                #        dSSTj[:Ny-2**m] = np.ma.masked_array(
+                #                               (np.absolute(Ti[2**m:] - Ti[:-2**m]))**q)
+                #    else:
+                #        dSSTj[j,:] = np.ma.masked_array(
+                #                               (np.absolute(Ti[j+2**m-Ny,:] - Ti[j,:]))**q)
+                # Use roll function
+                dSSTi = np.abs(Ti - np.roll(Ti,2**m,axis=1))**q
+                dSSTj = np.abs(Ti - np.roll(Ti,2**m,axis=0))**q
+                #counti = (~dSSTi.mask).astype('i4')
+                #countj = (~dSSTj.mask).astype('i4'
+                #sumcounti[m] = np.sum(counti)
+                #sumcountj[m] = np.sum(countj)
+                #Hi[m] = np.sum(np.absolute(dSSTi))/sumcounti[m]
+                #Hj[m] = np.sum(np.absolute(dSSTj))/sumcountj[m]
+                #Hi[m] = np.sum(dSSTi)/Ny
+                #Hj[m] = np.sum(dSSTj)/Nx
+                Hi[m] = dSSTi.mean()
+                Hj[m] = dSSTj.mean()
     
-        return L, Hi, Hj
+            return L, Hi, Hj
         
 
