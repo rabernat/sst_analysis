@@ -156,7 +156,7 @@ class IDEALFile(object):
         Kidx = np.digitize(K.ravel(), Ki)
         area = np.bincount(Kidx)
         isotropic_spectrum = np.ma.masked_invalid(
-                               np.bincount(Kidx, weights=PSD_2d.ravel()) / area )
+                               np.bincount(Kidx, weights=(PSD_2d*K*2.*np.pi).ravel()) / area )
         
         # step 6: return the results
         return nbins, Nx, Ny, k, l, PSD_2d, Ki, isotropic_spectrum[1:], area[1:]
@@ -216,7 +216,7 @@ class IDEALFile(object):
                     polar_coodx[j,i] = radi[j,i]*np.cos(angle[j,i])
                     polar_coody[j,i] = radi[j,i]*np.sin(angle[j,i])
             Sq = np.zeros((ang_index/2,Nx))
-            
+            # Unfinished script (This option does not work)
         else:
         # Calculate structure functions along each x-y axis
             print 'Anisotropic Structure Function'
