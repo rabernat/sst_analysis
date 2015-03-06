@@ -204,7 +204,7 @@ class IDEALFile(object):
         # Difference with 2^m gridpoints in between
         if iso:
         # Calculate structure functions isotropically
-            print 'Isotropic Structure Function'
+            #print 'Isotropic Structure Function'
             angle = np.arange(0,2.*np.pi,np.pi/180.)
             radi = np.arange(0,Nx/2,1)
             ang_index = len(angle)
@@ -219,7 +219,7 @@ class IDEALFile(object):
             # Unfinished script (This option does not work)
         else:
         # Calculate structure functions along each x-y axis
-            print 'Anisotropic Structure Function'
+            #print 'Anisotropic Structure Function'
             for m in range(ndel):
                 #dSSTi = np.zeros((Ny,Nx))
                 #dSSTj = np.zeros((Ny,Nx))
