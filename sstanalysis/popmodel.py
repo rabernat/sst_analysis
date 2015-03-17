@@ -98,7 +98,7 @@ class POPFile(object):
                    +(dTy**2 + np.roll(dTy,1,axis=1)**2) * self._dytr**2
         )        
         
-    def power_spectrum_2d(self, varname='SST', lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000):
+    def power_spectrum_2d(self, varname='SST', lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, nbins=256):
         """Calculate a two-dimensional power spectrum of netcdf variable 'varname'
            in the box defined by lonrange and latrange.
         """
@@ -204,10 +204,157 @@ class POPFile(object):
             # step 8: do the FFT for each timestep and aggregate the results
             Tif = fft.fftshift(fft.fft2(Ti))
             PSD_sum += 2.*np.real(Tif*np.conj(Tif))
+
+        # step 9: derive the isotropic spectrum
+        PSD_ave = PSD_sum/Nt
+        kk, ll = np.meshgrid(k, l)
+        K = np.sqrt(kk**2 + ll**2)
+        Ki = np.linspace(0, k.max(), nbins)
+        Kidx = np.digitize(K.ravel(), Ki)
+        area = np.bincount(Kidx)
+        isotropic_spectrum = np.ma.masked_invalid(
+                               np.bincount(Kidx, weights=(PSD_ave*K*2.*np.pi).ravel()) / area )
         
         # step 9: return the results
-        return Nt, Nx, Ny, k, l, PSD_sum
+        return Nt, Nx, Ny, k, l, PSD_sum, Ki, isotropic_spectrum[1:], area[1:]
         
+    def structure_function(self, varname='SST', lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, q=2, detre=True, windw=True, iso=False):
+        """Calculate a structure function of Matlab variable 'varname'
+           in the box defined by lonrange and latrange.
+        """
+
+        tlon = np.roll(self.nc.variables['TLONG'][:], roll)
+        tlat = np.roll(self.nc.variables['TLAT'][:], roll)
+
+        # step 1: figure out the box indices
+        lonmask = (tlon >= lonrange[0]) & (tlon < lonrange[1])
+        latmask = (tlat >= latrange[0]) & (tlat < latrange[1])
+        boxidx = lonmask & latmask # this won't necessarily be square
+        irange = np.where(boxidx.sum(axis=0))[0]
+        imin, imax = irange.min(), irange.max()
+        jrange = np.where(boxidx.sum(axis=1))[0]
+        jmin, jmax = jrange.min(), jrange.max()
+        #Nx = imax - imin
+        #Ny = jmax - jmin
+        lon = tlon[jmin:jmax, imin:imax]
+        lat = tlat[jmin:jmax, imin:imax]
+
+        # load data
+        T = np.roll(self.nc.variables[varname][:], roll)[..., jmin:jmax, imin:imax]
+
+        # define variables
+        Nt, Ny, Nx = T.shape
+        n = np.arange(0,np.log2(Nx/2), dtype='i4')
+        ndel = len(n)
+        L = 2**n
+        Hi = np.zeros(ndel)
+        Hj = np.zeros(ndel)
+        sumcounti = np.zeros(ndel)
+        sumcountj = np.zeros(ndel)
+
+        # Figure out if there is too much land in the box
+        MAX_LAND = 0.01 # only allow up to 1% of land
+        region_mask = np.roll(self.mask, roll)[jmin:jmax, imin:imax]
+        land_fraction = region_mask.sum().astype('f8') / (Ny*Nx)
+        if land_fraction==0.:
+            # no problem
+            pass
+        elif land_fraction >= MAX_LAND:
+            raise ValueError('The sector has too much land. land_fraction = ' + str(land_fraction))
+        else:
+            # do some interpolation
+            errstr = 'The sector has land (land_fraction=%g) but we are interpolating it out.' % land_fraction
+            warn(errstr)
+            # have to figure out how to actually do it
+            # Ti = ...
+
+        for n in range(Nt):
+            Ti = np.ma.masked_array(T[n], region_mask)
+           
+            # Interpolate the missing data (only if necessary)
+            if land_fraction>0. and land_fraction<MAX_LAND:
+                x = np.arange(0,Nx)
+                y = np.arange(0,Ny)
+                X,Y = np.meshgrid(x,y)
+                Zr = Ti.ravel()
+                Xr = np.ma.masked_array(X.ravel(), Zr.mask)
+                Yr = np.ma.masked_array(Y.ravel(), Zr.mask)
+                Xm = np.ma.masked_array( Xr.data, ~Xr.mask ).compressed()
+                Ym = np.ma.masked_array( Yr.data, ~Yr.mask ).compressed()
+                Zm = griddata(np.array([Xr.compressed(), Yr.compressed()]).T, 
+                                        Zr.compressed(), np.array([Xm,Ym]).T, method='nearest')
+                Znew = Zr.data
+                Znew[Zr.mask] = Zm
+                Znew.shape = Z.shape
+                Ti = Znew
+
+            # Detrend the data in two dimensions (least squares plane fit)
+            d_obs = np.reshape(Ti, (Nx*Ny,1))
+            G = np.ones((Ny*Nx,3))
+            for i in range(Ny):
+                G[Nx*i:Nx*i+Nx, 0] = i+1
+                G[Nx*i:Nx*i+Nx, 1] = np.arange(1, Nx+1)
+            m_est = np.dot(np.dot(lin.inv(np.dot(G.T, G)), G.T), d_obs)
+            d_est = np.dot(G, m_est)
+            Lin_trend = np.reshape(d_est, (Ny, Nx))
+            Ti -= Lin_trend
+
+            # window the data
+            # Hanning window
+            windowx = sig.hann(Nx)
+            windowy = sig.hann(Ny)
+            window = windowx*windowy[:,np.newaxis]
+            Ti *= window
+
+            # Difference with 2^m gridpoints in betweend
+            if iso:
+            # Calculate structure functions isotropically
+                #print 'Isotropic Structure Function'
+                angle = np.arange(0,2.*np.pi,np.pi/180.)
+                radi = np.arange(0,Nx/2,1)
+                ang_index = len(angle)
+                rad_index = len(radi)
+                polar_coodx = np.zeros((ang_index,rad_index))
+                polar_coody = np.zeros_like(polar_coodx)
+                for j in range(ang_index):
+                    for i in range(rad_index):
+                        polar_coodx[j,i] = radi[j,i]*np.cos(angle[j,i])
+                        polar_coody[j,i] = radi[j,i]*np.sin(angle[j,i])
+                Sq = np.zeros((ang_index/2,Nx))
+                # Unfinished script (This option does not work)
+            else:
+            # Calculate structure functions along each x-y axis
+                #print 'Anisotropic Structure Function'
+                for m in range(ndel):
+                    #dSSTi = np.zeros((Ny,Nx))
+                    #dSSTj = np.zeros((Ny,Nx))
+                    # Take the difference by displacing the matrices along each axis 
+                    #dSSTi = np.ma.masked_array((np.absolute(Ti[:,2**m:] - Ti[:,:-2**m]))**2) # .filled(0.)
+                    #dSSTj = np.ma.masked_array((np.absolute(Ti[2**m:] - Ti[:-2**m]))**2) # .filled(0.)
+                    # Take the difference by specifying the grid spacing
+                    #for i in range(Nx):
+                    #    if i+2**m<Nx:
+                    #        dSSTi[:,:Nx-2**m] = np.ma.masked_array(
+                    #                               (np.absolute(Ti[:,2**m:] - Ti[:,:-2**m]))**q)
+                    #    else:
+                    #        dSSTi[:,i] = np.ma.masked_array(
+                    #                               (np.absolute(Ti[:,i+2**m-Nx] - Ti[:,i]))**q)
+                    # Use roll function
+                    dSSTi = np.abs(Ti - np.roll(Ti,2**m,axis=1))**q
+                    dSSTj = np.abs(Ti - np.roll(Ti,2**m,axis=0))**q
+                    #counti = (~dSSTi.mask).astype('i4')
+                    #countj = (~dSSTj.mask).astype('i4'
+                    #sumcounti[m] = np.sum(counti)
+                    #sumcountj[m] = np.sum(countj)
+                    #Hi[m] = np.sum(np.absolute(dSSTi))/sumcounti[m]
+                    #Hj[m] = np.sum(np.absolute(dSSTj))/sumcountj[m]
+                    #Hi[m] = np.sum(dSSTi)/Ny
+                    #Hj[m] = np.sum(dSSTj)/Nx
+                    Hi[m] = dSSTi.mean()
+                    Hj[m] = dSSTj.mean()
+
+            return Nt, L, Hi, Hj
+
         
         
         
