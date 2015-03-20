@@ -350,8 +350,8 @@ class POPFile(object):
                     #Hj[m] = np.sum(np.absolute(dSSTj))/sumcountj[m]
                     #Hi[m] = np.sum(dSSTi)/Ny
                     #Hj[m] = np.sum(dSSTj)/Nx
-                    Hi[m] = dSSTi.mean()
-                    Hj[m] = dSSTj.mean()
+                    Hi[m] += dSSTi.mean()
+                    Hj[m] += dSSTj.mean()
 
             return Nt, L, Hi, Hj
 
