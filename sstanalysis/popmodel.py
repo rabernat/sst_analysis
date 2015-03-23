@@ -9,14 +9,14 @@ import gfd
 
 class POPFile(object):
     
-    def __init__(self, fname, ah=-3e17, is3d=False):
+    def __init__(self, fname, areaname='TAREA', maskname='KMT', ah=-3e17, is3d=False):
         """Wrapper for POP model netCDF files"""
         self.nc = netCDF4.Dataset(fname)
-        self.Ny, self.Nx = self.nc.variables['TAREA'].shape     
+        self.Ny, self.Nx = self.nc.variables[areaname].shape     
         self._ah = ah
         
         # mask
-        self.mask = self.nc.variables['KMT'][:] <= 1
+        self.mask = self.nc.variables[maskname][:] <= 1
 
         self.is3d = is3d
         if self.is3d:
@@ -30,16 +30,18 @@ class POPFile(object):
             for k in range(Nz):
                 self.mask3d[k] = (kmt<=k)
 
-    def mask_field(self, T):
+    def mask_field(self, maskname='KMT', varname='SST'):
         """Apply mask to tracer field T"""
-        return np.ma.masked_array(T, self.mask)
+        mask = self.nc.variables[maskname][:]
+        T = self.nc.variables[varname][:]
+        return np.ma.masked_array(T, mask<=1)
         
-    def initialize_gradient_operator(self):
+    def initialize_gradient_operator(self, areaname='TAREA'):
         """Needs to be called before calculating gradients"""
         # raw grid geometry
         work1 = (self.nc.variables['HTN'][:] /
                  self.nc.variables['HUW'][:])
-        tarea = self.nc.variables['TAREA'][:]
+        tarea = self.nc.variables[areaname][:]
         self.tarea = tarea
         tarea_r = np.ma.masked_invalid(tarea**-1).filled(0.)
         dtn = work1*tarea_r
@@ -98,14 +100,15 @@ class POPFile(object):
                    +(dTy**2 + np.roll(dTy,1,axis=1)**2) * self._dytr**2
         )        
         
-    def power_spectrum_2d(self, varname='SST', lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, nbins=256):
+    def power_spectrum_2d(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, nbins=256):
         """Calculate a two-dimensional power spectrum of netcdf variable 'varname'
            in the box defined by lonrange and latrange.
         """
     
-        tlon = np.roll(self.nc.variables['TLONG'][:], roll)
-        tlat = np.roll(self.nc.variables['TLAT'][:], roll)
-        
+        tlon = np.roll(self.nc.variables[lonname][:], roll)
+        tlat = np.roll(self.nc.variables[latname][:], roll)
+        #self.mask = self.nc.variables[maskname][:] <= 1
+
         # step 1: figure out the box indices
         lonmask = (tlon >= lonrange[0]) & (tlon < lonrange[1])
         latmask = (tlat >= latrange[0]) & (tlat < latrange[1])
@@ -122,10 +125,11 @@ class POPFile(object):
         # step 2: load the data
         #T = np.roll(self.nc.variables[varname],-1000)[..., jmin:jmax, imin:imax]
         T = np.roll(self.nc.variables[varname][:], roll)[..., jmin:jmax, imin:imax]
-        
+
         # step 3: figure out if there is too much land in the box
         MAX_LAND = 0.01 # only allow up to 1% of land
-        region_mask = np.roll(self.mask, roll)[jmin:jmax, imin:imax]
+        mask = self.nc.variables[maskname][:] <= 1
+        region_mask = np.roll(mask, roll)[jmin:jmax, imin:imax]
         land_fraction = region_mask.sum().astype('f8') / (Ny*Nx)
         if land_fraction==0.:
             # no problem
@@ -216,15 +220,15 @@ class POPFile(object):
                                np.bincount(Kidx, weights=(PSD_ave*K*2.*np.pi).ravel()) / area )
         
         # step 9: return the results
-        return Nt, Nx, Ny, k, l, PSD_sum, Ki, isotropic_spectrum[1:], area[1:]
+        return Nt, Nx, Ny, k, l, PSD_sum, Ki, isotropic_spectrum[1:], area[1:], lon, lat
         
-    def structure_function(self, varname='SST', lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, q=2, detre=True, windw=True, iso=False):
+    def structure_function(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, q=2, detre=True, windw=True, iso=False):
         """Calculate a structure function of Matlab variable 'varname'
            in the box defined by lonrange and latrange.
         """
 
-        tlon = np.roll(self.nc.variables['TLONG'][:], roll)
-        tlat = np.roll(self.nc.variables['TLAT'][:], roll)
+        tlon = np.roll(self.nc.variables[lonname][:], roll)
+        tlat = np.roll(self.nc.variables[latname][:], roll)
 
         # step 1: figure out the box indices
         lonmask = (tlon >= lonrange[0]) & (tlon < lonrange[1])
@@ -254,7 +258,8 @@ class POPFile(object):
 
         # Figure out if there is too much land in the box
         MAX_LAND = 0.01 # only allow up to 1% of land
-        region_mask = np.roll(self.mask, roll)[jmin:jmax, imin:imax]
+        mask = self.nc.variables[maskname][:] <= 1
+        region_mask = np.roll(mask, roll)[jmin:jmax, imin:imax]
         land_fraction = region_mask.sum().astype('f8') / (Ny*Nx)
         if land_fraction==0.:
             # no problem
@@ -353,7 +358,7 @@ class POPFile(object):
                     Hi[m] += dSSTi.mean()
                     Hj[m] += dSSTj.mean()
 
-            return Nt, L, Hi, Hj
+            return Nt, L, Hi, Hj, lon, lat
 
         
         
