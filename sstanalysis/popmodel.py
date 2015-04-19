@@ -140,7 +140,7 @@ class POPFile(object):
         
         return lon, lat, dxdbarTy[:,jmin:jmax,imin:imax], dydbarTx[:,jmin:jmax,imin:imax]
         
-    def mag_gradient_modulus(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000):
+    def mag_gradient_modulus(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', detr_win=False, lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000):
         """Return the modulus of the gradient of T at the tracer point."""
         
         tlon = np.roll(self.nc.variables[lonname][:], roll)
@@ -170,9 +170,30 @@ class POPFile(object):
             #T = 1e-2*np.roll(self.nc.variables[varname][:], roll)[..., jmin:jmax, imin:imax]
             T = 1e-2*(self.nc.variables[varname][:])
         
+        # step 6: detrend the data in two dimensions (least squares plane fit)
+        if detr_win:
+            for n in range(Nt):
+                Ti[n] = np.ma.masked_array(T[n], region_mask)
+                d_obs = np.reshape(Ti, (Nx*Ny,1))
+                G = np.ones((Ny*Nx,3))
+                for i in range(Ny):
+                    G[Nx*i:Nx*i+Nx, 0] = i+1
+                    G[Nx*i:Nx*i+Nx, 1] = np.arange(1, Nx+1)    
+                m_est = np.dot(np.dot(lin.inv(np.dot(G.T, G)), G.T), d_obs)
+                d_est = np.dot(G, m_est)
+                Lin_trend = np.reshape(d_est, (Ny, Nx))
+                Ti -= Lin_trend
+    
+                # step 7: window the data
+                # Hanning window
+                windowx = sig.hann(Nx)
+                windowy = sig.hann(Ny)
+                window = windowx*windowy[:,np.newaxis] 
+                Ti *= window
+        
         # step 3: calculate the difference
-        dTx = self._kmaske * (np.roll(T,-1,axis=0) - T)
-        dTy = self._kmaskn * (np.roll(T,-1,axis=1) - T)
+        dTx = self._kmaske * (np.roll(Ti,-1,axis=0) - Ti)
+        dTy = self._kmaskn * (np.roll(Ti,-1,axis=1) - Ti)
         #dTx = np.roll(dTx, roll)[:, jmin:jmax, imin:imax]
         #dTy = np.roll(dTy, roll)[:, jmin:jmax, imin:imax]
         
@@ -236,7 +257,7 @@ class POPFile(object):
         
         return Ti
         
-    def power_spectrum_2d(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', geos=False, lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, nbins=256, MAX_LAND=0.01):
+    def power_spectrum_2d(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', dxname='DXT', dyname='DYT', geos=False, grad=False, lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, nbins=256, MAX_LAND=0.01):
         """Calculate a two-dimensional power spectrum of netcdf variable 'varname'
            in the box defined by lonrange and latrange.
         """
@@ -259,21 +280,31 @@ class POPFile(object):
         lat = tlat[jmin:jmax, imin:imax]
         dlon_domain = np.roll(tlon,1)-np.roll(tlon, -1)
         dlat_domain = np.roll(tlat,1)-np.roll(tlat, -1)
+        dx = 1e-2*np.roll(self.nc.variables[dxname][:], roll, axis=1)
+        dy = 1e-2*np.roll(self.nc.variables[dyname][:], roll, axis=1)
 
         # step 2: load the data
         #T = np.roll(self.nc.variables[varname],-1000)[..., jmin:jmax, imin:imax]
         if varname=='SST':
-            T = np.roll(self.nc.variables[varname][:], roll)[..., jmin:jmax, imin:imax]
-        elif varname=='SSH' and geos:
-            T = 1e-2*np.roll(self.nc.variables[varname][:], roll)[..., jmin:jmax, imin:imax]
-            T = gfd.g/gfd.f_coriolis(lat)*(np.roll(T,1)-np.roll(T,-1))/(gfd.A*np.cos(np.radians(dlat_domain))*np.radians(dlon_domain))
+            T = np.roll(self.nc.variables[varname][:], roll, axis=2)
+            #dx = 1e-2*np.roll(self.nc.variables['DXT'][:], roll, axis=1)
+            #dy = 1e-2*np.roll(self.nc.variables['DYT'][:], roll, axis=1)
+        elif varname=='SSH_2':
+            T = 1e-2*np.roll(self.nc.variables[varname][:], roll, axis=2)
+            #T = gfd.g/gfd.f_coriolis(lat)*(np.roll(T,1)-np.roll(T,-1))/(gfd.A*np.cos(np.radians(dlat_domain))*np.radians(dlon_domain))
+            if geos:
+                barTy = .5*(np.roll(T,1,axis=1)+T)
+                T = gfd.g / gfd.f_coriolis(tlat) * (np.roll(barTy,1,axis=2)-barTy) / dx
+            elif grad:
+                barTy = .5*(np.roll(T,1,axis=1)+T)
+                T = (np.roll(barTy,1,axis=2)-np.roll(barTy,-1,axis=2)) / (dx+np.roll(dx,-1,axis=1))
         else:
-            T = 1e-2*np.roll(self.nc.variables[varname][:], roll)[..., jmin:jmax, imin:imax]
+            T = 1e-2*np.roll(self.nc.variables[varname][:], roll, axis=2)
 
         # step 3: figure out if there is too much land in the box
         #MAX_LAND = 0.01 # only allow up to 1% of land
         mask = self.nc.variables[maskname][:] <= 1
-        region_mask = np.roll(mask, roll)[jmin:jmax, imin:imax]
+        region_mask = np.roll(mask, roll, axis=1)[jmin:jmax, imin:imax]
         land_fraction = region_mask.sum().astype('f8') / (Ny*Nx)
         if land_fraction==0.:
             # no problem
@@ -289,24 +320,26 @@ class POPFile(object):
             warnings.warn(errstr)
         
         # step 4: figure out FFT parameters (k, l, etc.) and set up result variable
-        dlon = lon[np.round(np.floor(lon.shape[0]*0.5)), np.round(
-                     np.floor(lon.shape[1]*0.5))+1]-lon[np.round(
-                     np.floor(lon.shape[0]*0.5)), np.round(np.floor(lon.shape[1]*0.5))]
-        dlat = lat[np.round(np.floor(lat.shape[0]*0.5))+1, np.round(
-                     np.floor(lat.shape[1]*0.5))]-lat[np.round(
-                     np.floor(lat.shape[0]*0.5)), np.round(np.floor(lat.shape[1]*0.5))]
+        #dlon = lon[np.round(np.floor(lon.shape[0]*0.5)), np.round(
+        #             np.floor(lon.shape[1]*0.5))+1]-lon[np.round(
+        #             np.floor(lon.shape[0]*0.5)), np.round(np.floor(lon.shape[1]*0.5))]
+        #dlat = lat[np.round(np.floor(lat.shape[0]*0.5))+1, np.round(
+        #             np.floor(lat.shape[1]*0.5))]-lat[np.round(
+        #             np.floor(lat.shape[0]*0.5)), np.round(np.floor(lat.shape[1]*0.5))]
 
         # Spatial step
-        dx = gfd.A*np.cos(np.radians(lat[np.round(
-                     np.floor(lat.shape[0]*0.5)),np.round(
-                     np.floor(lat.shape[1]*0.5))]))*np.radians(dlon)
-        dy = gfd.A*np.radians(dlat)
+        #dx = gfd.A*np.cos(np.radians(lat[np.round(
+        #             np.floor(lat.shape[0]*0.5)),np.round(
+        #             np.floor(lat.shape[1]*0.5))]))*np.radians(dlon)
+        #dy = gfd.A*np.radians(dlat)
         
         # Wavenumber step
-        k = fft.fftshift(fft.fftfreq(Nx, dx))
-        l = fft.fftshift(fft.fftfreq(Ny, dy))
-        dk = np.diff(k)[0]
-        dl = np.diff(l)[0]
+        dx_domain = dx[jmin:jmax,imin:imax].copy()
+        dy_domain = dy[jmin:jmax,imin:imax].copy()
+        k = 2*np.pi*fft.fftshift(fft.fftfreq(Nx, dx_domain[Ny/2,Nx/2]))
+        l = 2*np.pi*fft.fftshift(fft.fftfreq(Ny, dy_domain[Ny/2,Nx/2]))
+        dk = np.diff(k)[0]*.5/np.pi
+        dl = np.diff(l)[0]*.5/np.pi
 
         ###################################
         ###  Start looping through each time step  ####
@@ -315,7 +348,7 @@ class POPFile(object):
         tilde2_sum = np.zeros((Ny,Nx))
         Ti2_sum = np.zeros((Ny,Nx))
         for n in range(Nt):
-            Ti = np.ma.masked_array(T[n], region_mask)
+            Ti = np.ma.masked_array(T[n, jmin:jmax, imin:imax].copy(), region_mask)
             
             # step 5: interpolate the missing data (only if necessary)
             if land_fraction>0. and land_fraction<MAX_LAND:
@@ -367,7 +400,7 @@ class POPFile(object):
         tilde2_ave = tilde2_sum/Nt
         breve2_ave = tilde2_ave/((Nx*Ny)**2*dk*dl)
         spac2_ave = Ti2_sum/Nt
-        np.testing.assert_almost_equal(breve2_ave.sum()/(dx*dy*(spac2_ave).sum()), 1., decimal=5)
+        np.testing.assert_almost_equal(breve2_ave.sum()/(dx_domain[Ny/2,Nx/2]*dy_domain[Ny/2,Nx/2]*(spac2_ave).sum()), 1., decimal=5)
         
         # step 10: derive the isotropic spectrum
         kk, ll = np.meshgrid(k, l)

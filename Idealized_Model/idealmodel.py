@@ -1,5 +1,5 @@
 import numpy as np
-import netCDF4
+#import netCDF4
 from warnings import warn
 from scipy import linalg as lin
 from scipy import signal as sig
@@ -99,28 +99,29 @@ class IDEALFile(object):
                    +(dTy**2 + np.roll(dTy,1,axis=1)**2) * self._dytr**2
         )        
         
-    def power_spectrum_2d(self, varname='bT', nbins=256, detre=False, windw=False):
+    def power_spectrum_2d(self, varname='bT', nbins=512, detre=False, windw=False,  grad=False):
         """Calculate a two-dimensional power spectrum of netcdf variable 'varname'
            in the box defined by lonrange and latrange.
         """
-        
+ 
         # step 1: load the data
         #T = np.roll(self.nc.variables[varname],-1000)[..., jmin:jmax, imin:imax]
         T = self.mat[varname][:]
         Ny, Nx = T.shape
-        dx = 1e0
-        dy = 1e0
+        dx = 1e3
+        dy = 1e3
 
         # Wavenumber step
-        k = fft.fftshift(fft.fftfreq(Nx, dx))
-        l = fft.fftshift(fft.fftfreq(Ny, dy))
+        k = 2*np.pi*fft.fftshift(fft.fftfreq(Nx, dx))
+        l = 2*np.pi*fft.fftshift(fft.fftfreq(Ny, dy))
 
         ##########################################
         ### Start looping through each time step #
         ##########################################
         #Nt = T.shape[0]
-        PSD_2d = np.zeros((Ny,Nx))
+        #PSD_2d = np.zeros((Ny,Nx))
         #for n in range(Nt):
+        
         Ti = T.copy()
             
         # step 2: detrend the data in three dimensions (least squares plane fit)
@@ -137,29 +138,41 @@ class IDEALFile(object):
             Ti -= Lin_trend
 
         # step 3: window the data
-        # Hanning window
         if windw:
             print 'Windowing Data'
+            # Hanning window
             windowx = sig.hann(Nx)
             windowy = sig.hann(Ny)
             window = windowx*windowy[:,np.newaxis] 
             Ti *= window
-
-        # step 4: do the FFT for each timestep and aggregate the results
+            
+        if grad:
+            Ti = (np.roll(Ti,1,axis=1)-Ti) / dx
+        
+        spac2_2d = Ti**2  
+        # step 4: do the FFT for each timestep
         Tif = fft.fftshift(fft.fft2(Ti))
-        PSD_2d += np.real(Tif*np.conj(Tif))
+        dk = np.diff(k)[0]*0.5/np.pi
+        dl = np.diff(l)[0]*0.5/np.pi
+        tilde2_2d = np.real(Tif*np.conj(Tif))
+        breve2_2d = tilde2_2d/((Nx*Ny)**2*dk*dl)
+        np.testing.assert_almost_equal(breve2_2d.sum()/(dx*dy*(spac2_2d.sum())), 1., decimal=5)
 
         # step 5: derive the isotropic spectrum
         kk, ll = np.meshgrid(k, l)
         K = np.sqrt(kk**2 + ll**2)
-        Ki = np.linspace(0, k.max(), nbins)
+        #Ki = np.linspace(0, k.max(), nbins)
+        Ki = np.linspace(0, K.max(), nbins)
+        deltaKi = np.diff(Ki)[0]
         Kidx = np.digitize(K.ravel(), Ki)
         area = np.bincount(Kidx)
-        isotropic_spectrum = np.ma.masked_invalid(
-                               np.bincount(Kidx, weights=(PSD_2d*K*2.*np.pi).ravel()) / area )
+        #isotropic_spectrum = 2.* np.ma.masked_invalid(
+        #                                       np.bincount(Kidx, weights=(dx*dy/Nx/Ny*PSD_2d*K*2.*np.pi).ravel()) / area )
+        isotropic_spectrum = 2.* np.ma.masked_invalid(
+                                               np.bincount(Kidx, weights=(breve2_2d).ravel()) / area )[1:] * Ki*2.*np.pi/deltaKi
         
         # step 6: return the results
-        return nbins, Nx, Ny, k, l, PSD_2d, Ki, isotropic_spectrum[1:], area[1:]
+        return nbins, Nx, Ny, k, l, spac2_2d, tilde2_2d, breve2_2d, Ki, isotropic_spectrum, area[1:]
 
     def structure_function(self, varname='bT', q=2, detre=False, windw=False, iso=False):
         """Calculate a structure function of Matlab variable 'varname'
