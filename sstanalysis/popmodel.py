@@ -264,6 +264,9 @@ class POPFile(object):
     
         tlon = np.roll(self.nc.variables[lonname][:], roll)
         tlat = np.roll(self.nc.variables[latname][:], roll)
+        tlon[tlon<0.] += 360.
+
+            
         #self.mask = self.nc.variables[maskname][:] <= 1
 
         # step 1: figure out the box indices
@@ -400,7 +403,8 @@ class POPFile(object):
         tilde2_ave = tilde2_sum/Nt
         breve2_ave = tilde2_ave/((Nx*Ny)**2*dk*dl)
         spac2_ave = Ti2_sum/Nt
-        np.testing.assert_almost_equal(breve2_ave.sum()/(dx_domain[Ny/2,Nx/2]*dy_domain[Ny/2,Nx/2]*(spac2_ave).sum()), 1., decimal=5)
+        if land_fraction==0.:
+            np.testing.assert_almost_equal(breve2_ave.sum()/(dx_domain[Ny/2,Nx/2]*dy_domain[Ny/2,Nx/2]*(spac2_ave).sum()), 1., decimal=5)
         
         # step 10: derive the isotropic spectrum
         kk, ll = np.meshgrid(k, l)
@@ -420,7 +424,7 @@ class POPFile(object):
         # step 10: return the results
         return Nt, Nx, Ny, k, l, spac2_ave, tilde2_ave, breve2_ave, Ki, isotropic_PSD, area[1:], lon, lat, land_fraction, MAX_LAND
         
-    def structure_function(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, q=2, detre=True, windw=True, iso=False):
+    def structure_function(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, q=2, MAX_LAND=0.01, detre=True, windw=True, iso=False):
         """Calculate a structure function of Matlab variable 'varname'
            in the box defined by lonrange and latrange.
         """
@@ -460,7 +464,7 @@ class POPFile(object):
             T = np.roll(self.nc.variables[varname][:], roll)[..., jmin:jmax, imin:imax]
         else:
             T = 1e-2*np.roll(self.nc.variables[varname][:], roll)[..., jmin:jmax, imin:imax]
-
+        
         # define variables
         Nt, Ny, Nx = T.shape
         n = np.arange(0,np.log2(Nx/2), dtype='i4')
@@ -472,7 +476,7 @@ class POPFile(object):
         sumcountj = np.zeros(ndel)
 
         # Figure out if there is too much land in the box
-        MAX_LAND = 0.01 # only allow up to 1% of land
+        #MAX_LAND = 0.01 # only allow up to 1% of land
         mask = self.nc.variables[maskname][:] <= 1
         region_mask = np.roll(mask, roll)[jmin:jmax, imin:imax]
         land_fraction = region_mask.sum().astype('f8') / (Ny*Nx)
@@ -495,6 +499,11 @@ class POPFile(object):
         ###################################
         for n in range(Nt):
             Ti = np.ma.masked_array(T[n], region_mask)
+            
+            if land_fraction<MAX_LAND:
+                pass
+            else:
+                break
            
             # Interpolate the missing data (only if necessary)
             #if land_fraction>0. and land_fraction<MAX_LAND:
@@ -514,7 +523,25 @@ class POPFile(object):
                 #Ti = Znew
 
             # Detrend the data in two dimensions (least squares plane fit)
-            d_obs = np.reshape(Ti, (Nx*Ny,1))
+            if land_fraction>0. and land_fraction<MAX_LAND:
+                x = np.arange(0,Nx)
+                y = np.arange(0,Ny)
+                X,Y = np.meshgrid(x,y)
+                Zr = Ti.ravel()
+                Xr = np.ma.masked_array(X.ravel(), Zr.mask)
+                Yr = np.ma.masked_array(Y.ravel(), Zr.mask)
+                Xm = np.ma.masked_array( Xr.data, ~Xr.mask ).compressed()
+                Ym = np.ma.masked_array( Yr.data, ~Yr.mask ).compressed()
+                Zm = naiso.griddata(np.array([Xr.compressed(), Yr.compressed()]).T, 
+                                    Zr.compressed(), np.array([Xm,Ym]).T, method='nearest')
+                Znew = Zr.data
+                Znew[Zr.mask] = Zm
+                Znew.shape = Ti.shape
+                Ti_forTrend = Znew
+            else:
+                Ti_forTrend = Ti.copy()
+                
+            d_obs = np.reshape(Ti_forTrend, (Nx*Ny,1))
             G = np.ones((Ny*Nx,3))
             for i in range(Ny):
                 G[Nx*i:Nx*i+Nx, 0] = i+1
@@ -531,7 +558,6 @@ class POPFile(object):
             window = windowx*windowy[:,np.newaxis]
             Ti *= window
 
-            # Difference with 2^m gridpoints in betweend
             if iso:
             # Calculate structure functions isotropically
                 #print 'Isotropic Structure Function'
@@ -546,7 +572,7 @@ class POPFile(object):
                         polar_coodx[j,i] = radi[j,i]*np.cos(angle[j,i])
                         polar_coody[j,i] = radi[j,i]*np.sin(angle[j,i])
                 Sq = np.zeros((ang_index/2,Nx))
-                # Unfinished script (This option does not work)
+                    # Unfinished script (This option does not work)
             else:
             # Calculate structure functions along each x-y axis
                 #print 'Anisotropic Structure Function'
@@ -578,7 +604,7 @@ class POPFile(object):
                     Hi[m] += dSSTi.mean()
                     Hj[m] += dSSTj.mean()
 
-            return Nt, dx, dy, L, Hi, Hj, lon, lat
+        return Nt, dx, dy, L, Hi, Hj, lon, lat, land_fraction, MAX_LAND
 
         
         
