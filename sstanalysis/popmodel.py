@@ -257,43 +257,79 @@ class POPFile(object):
         
         return Ti
         
-    def power_spectrum_2d(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', dxname='DXT', dyname='DYT', geos=False, grad=False, lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, nbins=256, MAX_LAND=0.01):
+    def power_spectrum_2d(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', dxname='DXT', dyname='DYT', geos=False, grad=False, lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, nbins=128, MAX_LAND=0.01, xmin=0, xmax=0, ymin=0, ymax=0, ymin_bound=0, ymax_bound=0, xmin_bound=0, xmax_bound=0):
         """Calculate a two-dimensional power spectrum of netcdf variable 'varname'
            in the box defined by lonrange and latrange.
         """
-    
-        tlon = np.roll(self.nc.variables[lonname][:], roll)
-        tlat = np.roll(self.nc.variables[latname][:], roll)
+        jmin_bound = ymin_bound
+        jmax_bound = ymax_bound
+        imin_bound = xmin_bound
+        imax_bound = xmax_bound
+        mask = self.nc.variables[maskname][:] <= 1
+        tlon = np.roll(np.ma.masked_array(self.nc.variables[lonname][:],mask), roll, axis=1)[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+        tlat = np.roll(np.ma.masked_array(self.nc.variables[latname][:],mask), roll, axis=1)[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
         tlon[tlon<0.] += 360.
+        
+        #Ny, Nx = tlon.shape
+        #x = np.arange(0,Nx)
+        #y = np.arange(0,Ny)
+        #X,Y = np.meshgrid(x,y)
+        #Zr = tlon.ravel()
+        #Xr = np.ma.masked_array(X.ravel(), Zr.mask)
+        #Yr = np.ma.masked_array(Y.ravel(), Zr.mask)
+        #Xm = np.ma.masked_array( Xr.data, ~Xr.mask ).compressed()
+        #Ym = np.ma.masked_array( Yr.data, ~Yr.mask ).compressed()
+        #Zm = naiso.griddata(np.array([Xr.compressed(), Yr.compressed()]).T, 
+        #                            Zr.compressed(), np.array([Xm,Ym]).T, method='linear')
+        #Znew = Zr.data
+        #Znew[Zr.mask] = Zm
+        #Znew.shape = tlon.shape
+        #tlon = Znew.copy()
+
+        #Zr = tlat.ravel()
+        #Xr = np.ma.masked_array(X.ravel(), Zr.mask)
+        #Yr = np.ma.masked_array(Y.ravel(), Zr.mask)
+        #Xm = np.ma.masked_array( Xr.data, ~Xr.mask ).compressed()
+        #Ym = np.ma.masked_array( Yr.data, ~Yr.mask ).compressed()
+        #Zm = naiso.griddata(np.array([Xr.compressed(), Yr.compressed()]).T, 
+        #                            Zr.compressed(), np.array([Xm,Ym]).T, method='linear')
+        #Znew = Zr.data
+        #Znew[Zr.mask] = Zm
+        #Znew.shape = tlat.shape
+        #tlat = Znew.copy()
 
             
         #self.mask = self.nc.variables[maskname][:] <= 1
 
         # step 1: figure out the box indices
-        lonmask = (tlon >= lonrange[0]) & (tlon < lonrange[1])
-        latmask = (tlat >= latrange[0]) & (tlat < latrange[1])
-        boxidx = lonmask & latmask # this won't necessarily be square
-        irange = np.where(boxidx.sum(axis=0))[0]
-        imin, imax = irange.min(), irange.max()
-        jrange = np.where(boxidx.sum(axis=1))[0]
-        jmin, jmax = jrange.min(), jrange.max()
+        #lonmask = (tlon >= lonrange[0]) & (tlon < lonrange[1])
+        #latmask = (tlat >= latrange[0]) & (tlat < latrange[1])
+        #boxidx = lonmask & latmask # this won't necessarily be square
+        #irange = np.where(boxidx.sum(axis=0))[0]
+        #imin, imax = irange.min(), irange.max()
+        #jrange = np.where(boxidx.sum(axis=1))[0]
+        #jmin, jmax = jrange.min(), jrange.max()
+        imax = xmax
+        imin = xmin
+        jmax = ymax
+        jmin = ymin
         Nx = imax - imin
         Ny = jmax - jmin
         lon = tlon[jmin:jmax, imin:imax]
         lat = tlat[jmin:jmax, imin:imax]
-        dlon_domain = np.roll(tlon,1)-np.roll(tlon, -1)
-        dlat_domain = np.roll(tlat,1)-np.roll(tlat, -1)
-        dx = 1e-2*np.roll(self.nc.variables[dxname][:], roll, axis=1)
-        dy = 1e-2*np.roll(self.nc.variables[dyname][:], roll, axis=1)
+        #dlon_domain = np.roll(tlon,1)-np.roll(tlon, -1)
+        #dlat_domain = np.roll(tlat,1)-np.roll(tlat, -1)
+        dx = 1e-2*np.roll(self.nc.variables[dxname][:], roll, axis=1)[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+        dy = 1e-2*np.roll(self.nc.variables[dyname][:], roll, axis=1)[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
 
         # step 2: load the data
         #T = np.roll(self.nc.variables[varname],-1000)[..., jmin:jmax, imin:imax]
         if varname=='SST':
-            T = np.roll(self.nc.variables[varname][:], roll, axis=2)
+            T = np.roll(self.nc.variables[varname][:], roll, axis=2)[:,jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
             #dx = 1e-2*np.roll(self.nc.variables['DXT'][:], roll, axis=1)
             #dy = 1e-2*np.roll(self.nc.variables['DYT'][:], roll, axis=1)
         elif varname=='SSH_2':
-            T = 1e-2*np.roll(self.nc.variables[varname][:], roll, axis=2)
+            T = 1e-2*np.roll(self.nc.variables[varname][:], roll, axis=2)[:,jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
             #T = gfd.g/gfd.f_coriolis(lat)*(np.roll(T,1)-np.roll(T,-1))/(gfd.A*np.cos(np.radians(dlat_domain))*np.radians(dlon_domain))
             if geos:
                 barTy = .5*(np.roll(T,1,axis=1)+T)
@@ -302,14 +338,14 @@ class POPFile(object):
                 barTy = .5*(np.roll(T,1,axis=1)+T)
                 T = (np.roll(barTy,1,axis=2)-np.roll(barTy,-1,axis=2)) / (dx+np.roll(dx,-1,axis=1))
         else:
-            T = 1e-2*np.roll(self.nc.variables[varname][:], roll, axis=2)
+            T = 1e-2*np.roll(self.nc.variables[varname][:], roll, axis=2)[:,jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
 
         # step 3: figure out if there is too much land in the box
         #MAX_LAND = 0.01 # only allow up to 1% of land
-        mask = self.nc.variables[maskname][:] <= 1
-        region_mask = np.roll(mask, roll, axis=1)[jmin:jmax, imin:imax]
+        mask_domain = np.roll(mask, roll, axis=1)[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+        region_mask = mask_domain[jmin:jmax, imin:imax]
         land_fraction = region_mask.sum().astype('f8') / (Ny*Nx)
-        if land_fraction==0.:
+        if land_fraction == 0.:
             # no problem
             pass
         elif land_fraction >= MAX_LAND:
@@ -424,13 +460,14 @@ class POPFile(object):
         # step 10: return the results
         return Nt, Nx, Ny, k, l, spac2_ave, tilde2_ave, breve2_ave, Ki, isotropic_PSD, area[1:], lon, lat, land_fraction, MAX_LAND
         
-    def structure_function(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, q=2, MAX_LAND=0.01, detre=True, windw=True, iso=False):
+    def structure_function(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', dxname='DXT', dyname='DYT', lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, q=2, MAX_LAND=0.01, detre=True, windw=True, iso=False):
         """Calculate a structure function of Matlab variable 'varname'
            in the box defined by lonrange and latrange.
         """
 
         tlon = np.roll(self.nc.variables[lonname][:], roll)
         tlat = np.roll(self.nc.variables[latname][:], roll)
+        tlon[tlon<0.] += 360.
 
         # step 1: figure out the box indices
         lonmask = (tlon >= lonrange[0]) & (tlon < lonrange[1])
