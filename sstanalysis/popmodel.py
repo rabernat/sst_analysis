@@ -407,7 +407,7 @@ class POPFile(object):
         
         return Nt, Variance
         
-    def power_spectrum_2d(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', dxname='DXT', dyname='DYT', filename=False, geos=False, grad=False, lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, nbins=128, MAX_LAND=0.01, xmin=0, xmax=0, ymin=0, ymax=0, ymin_bound=0, ymax_bound=0, xmin_bound=0, xmax_bound=0):
+    def power_spectrum_2d(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', dxname='DXT', dyname='DYT', filename=False, geosx=False, geosy=False, grady=False, lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, nbins=128, MAX_LAND=0.01, xmin=0, xmax=0, ymin=0, ymax=0, ymin_bound=0, ymax_bound=0, xmin_bound=0, xmax_bound=0):
         """Calculate a two-dimensional power spectrum of netcdf variable 'varname'
            in the box defined by lonrange and latrange.
         """
@@ -481,10 +481,13 @@ class POPFile(object):
         elif varname=='SSH_2':
             T = 1e-2*np.roll(self.nc.variables[varname][:], roll, axis=2)[:,jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
             #T = gfd.g/gfd.f_coriolis(lat)*(np.roll(T,1)-np.roll(T,-1))/(gfd.A*np.cos(np.radians(dlat_domain))*np.radians(dlon_domain))
-            if geos:
+            if geosy:
                 barTy = .5*(np.roll(T,1,axis=1)+T)
-                T = gfd.g / gfd.f_coriolis(tlat) * (np.roll(barTy,1,axis=2)-barTy) / dx
-            elif grad:
+                T = - gfd.g / gfd.f_coriolis(tlat) * (np.roll(barTy,1,axis=2)-barTy) / dx
+            elif geosx:
+                barTx = .5*(np.roll(T,1,axis=2)+T)
+                T = gfd.g / gfd.f_coriolis(tlat) * (np.roll(barTx,1,axis=1)-barTx) / dy
+            elif grady:
                 barTy = .5*(np.roll(T,1,axis=1)+T)
                 T = (np.roll(barTy,1,axis=2)-np.roll(barTy,-1,axis=2)) / (dx+np.roll(dx,-1,axis=1))
         else:
