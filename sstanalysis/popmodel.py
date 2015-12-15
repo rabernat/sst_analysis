@@ -1,4 +1,5 @@
 import numpy as np
+import xray
 import netCDF4
 import warnings
 from warnings import warn
@@ -12,8 +13,10 @@ class POPFile(object):
     
     def __init__(self, fname, areaname='TAREA', maskname='KMT', ah=-3e17, is3d=False):
         """Wrapper for POP model netCDF files"""
-        self.nc = netCDF4.Dataset(fname)
-        self.Ny, self.Nx = self.nc.variables[areaname].shape     
+        #self.nc = netCDF4.Dataset(fname)
+        self.nc = xray.open_dataset(fname, decode_times=False)
+        #self.Ny, self.Nx = self.nc.variables[areaname].shape  
+        self.Ny, self.Nx = self.nc[areaname].shape  
         self._ah = ah
         
         # mask
@@ -21,90 +24,131 @@ class POPFile(object):
 
         self.is3d = is3d
         if self.is3d:
-            self.z_t = nc.variables['z_t'][:]
-            self.z_w_top = nc.variables['z_w_top'][:]
-            self.z_w_bot = nc.variables['z_w_bop'][:]
+            #self.z_t = nc.variables['z_t'][:]
+            #self.z_w_top = nc.variables['z_w_top'][:]
+            #self.z_w_bot = nc.variables['z_w_bop'][:]
+            self.z_t = nc['z_t'][:]
+            self.z_w_top = nc['z_w_top'][:]
+            self.z_w_bot = nc['z_w_bop'][:]
             self.Nz = len(self.z_t)
-            kmt = p.nc.variables['KMT'][:]
-            self.mask3d = np.zeros((self.Nz, self.Ny, self.Nx), dtype='b')
+            #kmt = p.nc.variables['KMT'][:]
+            kmt = nc['KMT'][:]
+            #self.mask3d = np.zeros((self.Nz, self.Ny, self.Nx), dtype='b')
+            self.mask3d = xray.DataArray(np.zeros((self.Nz, self.Ny, self.Nx), dtype='b'), coords=kmt.coords, dims=kmt.dims)
             Nz = mask3d.shape[0]
             for k in range(Nz):
                 self.mask3d[k] = (kmt<=k)
 
     def mask_field(self, maskname='KMT', varname='SST'):
         """Apply mask to tracer field T"""
-        mask = self.nc.variables[maskname][:]
-        T = self.nc.variables[varname][:]
-        return np.ma.masked_array(T, mask<=1)
+        #mask = self.nc.variables[maskname][:]
+        #T = self.nc.variables[varname][:]
+        mask = self.nc[maskname][:]
+        T = self.nc[varname][:]
+        #return np.ma.masked_array(T, mask<=1)
+        return T.where( mask>1 )
         
     def initialize_gradient_operator(self, areaname='TAREA'):
         """Needs to be called before calculating gradients"""
         # raw grid geometry
-        work1 = (self.nc.variables['HTN'][:] /
-                 self.nc.variables['HUW'][:])
-        tarea = self.nc.variables[areaname][:]
+        #work1 = (self.nc.variables['HTN'][:] /
+        #         self.nc.variables['HUW'][:])
+        work1 = (self.nc['HTN'][:] / self.nc['HUW'][:])
+        #tarea = self.nc.variables[areaname][:]
+        tarea = self.nc[areaname][:]
         self.tarea = tarea
-        tarea_r = np.ma.masked_invalid(tarea**-1).filled(0.)
+        #tarea_r = np.ma.masked_invalid(tarea**-1).filled(0.)
+        tarea_r = xray.DataArray( np.ma.masked_invalid(tarea**-1).filled(0.), coords=tarea.coords, dims=tarea.dims )
         dtn = work1*tarea_r
-        dts = np.roll(work1,-1,axis=0)*tarea_r
+        #dts = np.roll(work1,-1,axis=0)*tarea_r
+        dts = xray.DataArray.roll(work1,-1,axis=0)*tarea_r
         
-        work1 = (self.nc.variables['HTE'][:] /
-                 self.nc.variables['HUS'][:])
+        #work1 = (self.nc.variables['HTE'][:] /
+        #         self.nc.variables['HUS'][:])
+        work1 = (self.nc['HTE'][:] / self.nc['HUS'][:])
         dte = work1*tarea_r
-        dtw = np.roll(work1,-1,axis=1)*tarea_r
+        #dtw = np.roll(work1,-1,axis=1)*tarea_r
+        dtw = xray.DataArray.roll(work1,-1,axis=1)*tarea_r
         
         # boundary conditions
-        kmt = self.nc.variables['KMT'][:] > 1
-        kmtn = np.roll(kmt,-1,axis=0)
-        kmts = np.roll(kmt,1,axis=0)
-        kmte = np.roll(kmt,-1,axis=1)
-        kmtw = np.roll(kmt,1,axis=1)
-        self._cn = np.where( kmt & kmtn, dtn, 0.)
-        self._cs = np.where( kmt & kmts, dts, 0.)
-        self._ce = np.where( kmt & kmte, dte, 0.)
-        self._cw = np.where( kmt & kmtw, dtw, 0.)
+        #kmt = self.nc.variables['KMT'][:] > 1
+        kmt = self.nc['KMT'][:] > 1
+        #kmtn = np.roll(kmt,-1,axis=0)
+        #kmts = np.roll(kmt,1,axis=0)
+        #kmte = np.roll(kmt,-1,axis=1)
+        #kmtw = np.roll(kmt,1,axis=1)
+        kmtn = kmt.roll(nlat=-1)
+        kmts = kmt.roll(nlat=1)
+        kmte = kmt.roll(nlon=-1)
+        kmtw = kmt.roll(nlon=1)
+        #self._cn = np.where( kmt & kmtn, dtn, 0.)
+        #self._cs = np.where( kmt & kmts, dts, 0.)
+        #self._ce = np.where( kmt & kmte, dte, 0.)
+        #self._cw = np.where( kmt & kmtw, dtw, 0.)
+        self._cn = xray.DataArray(np.where( kmt & kmtn, dtn, 0.))
+        self._cs = xray.DataArray(np.where( kmt & kmts, dts, 0.))
+        self._ce = xray.DataArray(np.where( kmt & kmte, dte, 0.))
+        self._cw = xray.DataArray(np.where( kmt & kmtw, dtw, 0.))
         self._cc = -(self._cn + self._cs + self._ce + self._cw)
         
         # mixing coefficients
         #self._ah = -0.2e20*(1280.0/self.Nx)
-        j_eq = np.argmin(self.nc.variables['ULAT'][:,0]**2)
-        self._ahf = (tarea / self.nc.variables['UAREA'][j_eq,0])**1.5
+        #j_eq = np.argmin(self.nc.variables['ULAT'][:,0]**2)
+        j_eq = np.argmin(self.nc['ULAT'][:,0]**2)
+        #self._ahf = (tarea / self.nc.variables['UAREA'][j_eq,0])**1.5
+        self._ahf = (tarea / self.nc['UAREA'][j_eq,0])**1.5
         self._ahf[self.mask] = 0.   
         
         # stuff for gradient
         # reciprocal of dx and dy (in meters)
-        self._dxtr = 100.*self.nc.variables['DXT'][:]**-1
-        self._dytr = 100.*self.nc.variables['DYT'][:]**-1
-        self._kmaske = np.where(kmt & kmte, 1., 0.)
-        self._kmaskn = np.where(kmt & kmtn, 1., 0.)
+        #self._dxtr = 100.*self.nc.variables['DXT'][:]**-1
+        self._dxtr = 100.*self.nc['DXT'][:]**-1
+        #self._dytr = 100.*self.nc.variables['DYT'][:]**-1
+        self._dytr = 100.*self.nc['DYT'][:]**-1
+        #self._kmaske = np.where(kmt & kmte, 1., 0.)
+        self._kmaske = xray.DataArray(np.where(kmt & kmte, 1., 0.))
+        #self._kmaskn = np.where(kmt & kmtn, 1., 0.)
+        self._kmaskn = xray.DataArray(np.where(kmt & kmtn, 1., 0.))
         
-        self._dxu = self.nc.variables['DXU'][:]
-        self._dyu = self.nc.variables['DYU'][:]
+        #self._dxu = self.nc.variables['DXU'][:]
+        #self._dyu = self.nc.variables['DYU'][:]
+        self._dxu = self.nc['DXU'][:]
+        self._dyu = self.nc['DYU'][:]
                 
     def laplacian(self, T):
         """Returns the laplacian of T at the tracer point."""
+        #return (
+            #self._cc*T +
+            #self._cn*np.roll(T,-1,axis=0) +
+            #self._cs*np.roll(T,1,axis=0) +
+            #self._ce*np.roll(T,-1,axis=1) +
+            #self._cw*np.roll(T,1,axis=1)          
+        #)
         return (
             self._cc*T +
-            self._cn*np.roll(T,-1,axis=0) +
-            self._cs*np.roll(T,1,axis=0) +
-            self._ce*np.roll(T,-1,axis=1) +
-            self._cw*np.roll(T,1,axis=1)          
+            self._cn*T.roll(nlat=-1) + self._cs*T.roll(nlat=1) +
+            self._ce*T.roll(nlon=-1) + self._cw*T.roll(nlon=1)          
         )
     
     def gradient_modulus(self, varname='SST', lonname='ULONG', latname='ULAT', maskname='KMT', dxname='DXU', dyname='DYU', lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000):
         """Return the modulus of the gradient of tracer at U points."""
         
-        tlon = np.roll(self.nc.variables[lonname][:], roll, axis=1)
-        tlat = np.roll(self.nc.variables[latname][:], roll, axis=1)
+        #tlon = np.roll(self.nc.variables[lonname][:], roll, axis=1)
+        #tlat = np.roll(self.nc.variables[latname][:], roll, axis=1)
+        tlon = self.nc[lonname][:].roll(nlon=roll)
+        tlat = self.nc[latname][:].roll(nlon=roll)
         #tmask = np.roll(self.nc.variables[maskname][:], roll) <= 1
 
         # step 1: figure out the box indices
         lonmask = (tlon >= lonrange[0]) & (tlon < lonrange[1])
         latmask = (tlat >= latrange[0]) & (tlat < latrange[1])
-        boxidx = lonmask & latmask       # this won't necessarily be square
+        #boxidx = lonmask & latmask       # this won't necessarily be square
+        boxidx = latmask & lonmask
         irange = np.where(boxidx.sum(axis=0))[0]
+        #irange = xray.DataArray.where(boxidx.sum(dim='nlat'))[0]
         imin, imax = irange.min(), irange.max()
         jrange = np.where(boxidx.sum(axis=1))[0]
+        #jrange = xray.DataArray.where(boxidx.sum(dim='nlon'))[0]
         jmin, jmax = jrange.min(), jrange.max()
         Nx = imax - imin
         Ny = jmax - jmin
@@ -133,8 +177,8 @@ class POPFile(object):
         barTx = .5*(np.roll(Ti,1,axis=2)+Ti)
         
         # step 3: calculate the difference
-        dxdbarTy = (barTy - np.roll(barTy,1,axis=2))/dx
-        dydbarTx = (barTx - np.roll(barTx,1,axis=1))/dy
+        dxdbarTy = .5 * (barTy - np.roll(barTy,1,axis=2))/dx
+        dydbarTx = .5 * (barTx - np.roll(barTx,1,axis=1))/dy
         #dTx = np.roll(dTx, roll)[:, jmin:jmax, imin:imax]
         #dTy = np.roll(dTy, roll)[:, jmin:jmax, imin:imax]
         
@@ -165,10 +209,12 @@ class POPFile(object):
         #T = np.roll(self.nc.variables[varname],-1000)[..., jmin:jmax, imin:imax]
         if varname=='SST':
             #T = np.roll(self.nc.variables[varname][:], roll)[..., jmin:jmax, imin:imax]
-            T = self.nc.variables[varname][:]
+            #T = self.nc.variables[varname][:]
+            T = self.nc[varname][:]
         else:
             #T = 1e-2*np.roll(self.nc.variables[varname][:], roll)[..., jmin:jmax, imin:imax]
-            T = 1e-2*(self.nc.variables[varname][:])
+            #T = 1e-2*(self.nc.variables[varname][:])
+            T = 1e-2*(self.nc[varname][:])
         
         # step 6: detrend the data in two dimensions (least squares plane fit)
         if detr_win:
@@ -192,14 +238,19 @@ class POPFile(object):
                 Ti *= window
         
         # step 3: calculate the difference
-        dTx = self._kmaske * (np.roll(Ti,-1,axis=0) - Ti)
-        dTy = self._kmaskn * (np.roll(Ti,-1,axis=1) - Ti)
+        #dTx = self._kmaske * (np.roll(Ti,-1,axis=0) - Ti)
+        #dTy = self._kmaskn * (np.roll(Ti,-1,axis=1) - Ti)
+        dTx = self._kmaske * xray.DataArray( (np.roll(Ti,-1,axis=0) - Ti), coords=self._kmaske.coords, dims=self._kmaske.dims )
+        dTy = self._kmaskn * xray.DataArray( (np.roll(Ti,-1,axis=1) - Ti), coords=self._kmaskn.coords, dims=self._kmaskn.dims )
         #dTx = np.roll(dTx, roll)[:, jmin:jmax, imin:imax]
         #dTy = np.roll(dTy, roll)[:, jmin:jmax, imin:imax]
         
-        return jmin, jmax, imin, imax, roll, lon, lat, np.sqrt( 0.5 *
-                    (dTx**2 + np.roll(dTx,1,axis=0)**2) * self._dxtr**2
-                    + .5 * (dTy**2 + np.roll(dTy,1,axis=1)**2) * self._dytr**2 )   
+        return jmin, jmax, imin, imax, roll, lon, lat, xray.DataArray( np.sqrt( 0.5 *
+                            (dTx**2 + xray.DataArray.roll(dTx,1,axis=0)**2) * self._dxtr**2
+                            + .5 * (dTy**2 + xrayDataArray.roll(dTy,1,axis=1)**2) * self._dytr**2 ),  )
+                   #np.sqrt( 0.5 *
+                            #(dTx**2 + xray.DataArray.roll(dTx,1,axis=0)**2) * self._dxtr**2
+                            #+ .5 * (dTy**2 + xrayDataArray.roll(dTy,1,axis=1)**2) * self._dytr**2 )
     
     def detrend_window_2d(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', geos=False, lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000):
         """Detrend and window 2D data"""
@@ -283,7 +334,7 @@ class POPFile(object):
 
         # step 2: load the data
         #T = np.roll(self.nc.variables[varname],-1000)[..., jmin:jmax, imin:imax]
-        if varname=='SST':
+        if varname=='SST' or varname=='SSS':
             T = np.roll(self.nc.variables[varname][:], roll, axis=2)[:,jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
             #dx = 1e-2*np.roll(self.nc.variables['DXT'][:], roll, axis=1)
             #dy = 1e-2*np.roll(self.nc.variables['DYT'][:], roll, axis=1)
@@ -409,15 +460,22 @@ class POPFile(object):
         
     def power_spectrum_2d(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', dxname='DXT', dyname='DYT', filename=False, geosx=False, geosy=False, grady=False, lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, nbins=128, MAX_LAND=0.01, xmin=0, xmax=0, ymin=0, ymax=0, ymin_bound=0, ymax_bound=0, xmin_bound=0, xmax_bound=0):
         """Calculate a two-dimensional power spectrum of netcdf variable 'varname'
-           in the box defined by lonrange and latrange.
+            in the box defined by lonrange and latrange.
         """
         jmin_bound = ymin_bound
         jmax_bound = ymax_bound
         imin_bound = xmin_bound
         imax_bound = xmax_bound
-        mask = self.nc.variables[maskname][:] <= 1
-        tlon = np.roll(np.ma.masked_array(self.nc.variables[lonname][:],mask), roll, axis=1)[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
-        tlat = np.roll(np.ma.masked_array(self.nc.variables[latname][:],mask), roll, axis=1)[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+        #mask = self.nc.variables[maskname][:] <= 1
+        mask = self.nc[maskname].values <= 1
+        #tlon = np.roll(np.ma.masked_array(self.nc.variables[lonname][:],mask), roll, axis=1)[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+        #tlat = np.roll(np.ma.masked_array(self.nc.variables[latname][:],mask), roll, axis=1)[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+        tlon = np.roll(np.ma.masked_array(self.nc[lonname].values, mask), roll, axis=1)[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+        tlat = np.roll(np.ma.masked_array(self.nc[latname].values, mask), roll, axis=1)[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+        #tlon = xray.DataArray(np.ma.masked_array(self.nc[lonname][:],
+                                                 #mask)).roll( nlon=roll )[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+        #tlat = xray.DataArray(np.ma.masked_array(self.nc[latname][:],
+                                                 #mask)).roll( nlon=roll )[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
         tlon[tlon<0.] += 360.
         
         #Ny, Nx = tlon.shape
@@ -469,33 +527,50 @@ class POPFile(object):
         lat = tlat[jmin:jmax, imin:imax]
         #dlon_domain = np.roll(tlon,1)-np.roll(tlon, -1)
         #dlat_domain = np.roll(tlat,1)-np.roll(tlat, -1)
-        dx = 1e-2*np.roll(self.nc.variables[dxname][:], roll, axis=1)[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
-        dy = 1e-2*np.roll(self.nc.variables[dyname][:], roll, axis=1)[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+        #dx = 1e-2*np.roll(self.nc.variables[dxname][:], roll, axis=1)[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+        #dy = 1e-2*np.roll(self.nc.variables[dyname][:], roll, axis=1)[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+        dx = 1e-2*np.roll(self.nc[dxname].values, roll, axis=1)[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+        dy = 1e-2*np.roll(self.nc[dyname].values, roll, axis=1)[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+        #dx = 1e-2 * self.nc[dxname][:].roll( nlon=roll )[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+        #dy = 1e-2 * self.nc[dyname][:].roll( nlon=roll )[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
 
         # step 2: load the data
         #T = np.roll(self.nc.variables[varname],-1000)[..., jmin:jmax, imin:imax]
         if varname=='SST' or varname=='SSS':
-            T = np.roll(self.nc.variables[varname][:], roll, axis=2)[:,jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+            #T = np.roll(self.nc.variables[varname][:], roll, axis=2)[:,jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+            T = np.roll(self.nc[varname].values, roll, axis=2)[:,jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+            #T = self.nc[varname][:].roll( nlon=roll )[:, jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
             #dx = 1e-2*np.roll(self.nc.variables['DXT'][:], roll, axis=1)
             #dy = 1e-2*np.roll(self.nc.variables['DYT'][:], roll, axis=1)
         elif varname=='SSH_2':
-            T = 1e-2*np.roll(self.nc.variables[varname][:], roll, axis=2)[:,jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+            #T = 1e-2*np.roll(self.nc.variables[varname][:], roll, axis=2)[:,jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+            T = 1e-2 * np.roll(self.nc[varname].values, roll, axis=2)[:, jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+            #T = 1e-2 * self.nc[varname][:].roll( nlon=roll )[:, jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
             #T = gfd.g/gfd.f_coriolis(lat)*(np.roll(T,1)-np.roll(T,-1))/(gfd.A*np.cos(np.radians(dlat_domain))*np.radians(dlon_domain))
             if geosy:
                 barTy = .5*(np.roll(T,1,axis=1)+T)
                 T = - gfd.g / gfd.f_coriolis(tlat) * (np.roll(barTy,1,axis=2)-barTy) / dx
+                #barTy = .5 * ( T.roll( nlat=1 ) + T )
+                #T = - gfd.g / gfd.f_coriolis(tlat) * ( barTy.roll( nlon=1 ) - barTy ) / dx
             elif geosx:
                 barTx = .5*(np.roll(T,1,axis=2)+T)
                 T = gfd.g / gfd.f_coriolis(tlat) * (np.roll(barTx,1,axis=1)-barTx) / dy
+                #barTx = .5 * ( T.roll( nlon=1 ) + T )
+                #T = gfd.g / gfd.f_coriolis(tlat) * ( barTx.roll( nlat=1 ) - barTx ) / dy
             elif grady:
                 barTy = .5*(np.roll(T,1,axis=1)+T)
                 T = (np.roll(barTy,1,axis=2)-np.roll(barTy,-1,axis=2)) / (dx+np.roll(dx,-1,axis=1))
+                #barTy = .5 * ( T.roll( nlat=1 ) + T )
+                #T = ( barTy.roll( nlon=1 ) - barTy.roll( nlon=-1 ) ) / ( dx + dx.roll(nlat=-1) )
         else:
-            T = 1e-2*np.roll(self.nc.variables[varname][:], roll, axis=2)[:,jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+            #T = 1e-2*np.roll(self.nc.variables[varname][:], roll, axis=2)[:,jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+            T = 1e-2*np.roll(self.nc[varname].values, roll, axis=2)[:,jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+            #T = 1e-2 * self.nc[varname][:].roll( nlon=roll )[:, jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
 
         # step 3: figure out if there is too much land in the box
         #MAX_LAND = 0.01 # only allow up to 1% of land
-        mask_domain = np.roll(mask, roll, axis=1)[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+        mask_domain = np.roll( mask, roll, axis=1 )[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+        #mask_domain = mask.roll( nlon=roll )[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
         region_mask = mask_domain[jmin:jmax, imin:imax]
         land_fraction = region_mask.sum().astype('f8') / (Ny*Nx)
         if land_fraction == 0.:
@@ -528,18 +603,23 @@ class POPFile(object):
         # Wavenumber step
         dx_domain = dx[jmin:jmax,imin:imax].copy()
         dy_domain = dy[jmin:jmax,imin:imax].copy()
-        k = 2*np.pi*fft.fftshift(fft.fftfreq(Nx, dx_domain[Ny/2,Nx/2]))
-        l = 2*np.pi*fft.fftshift(fft.fftfreq(Ny, dy_domain[Ny/2,Nx/2]))
-        dk = np.diff(k)[0]*.5/np.pi
-        dl = np.diff(l)[0]*.5/np.pi
+        # PREVIOUS
+        #k = 2*np.pi*fft.fftshift(fft.fftfreq(Nx, dx_domain[Ny/2,Nx/2]))
+        #l = 2*np.pi*fft.fftshift(fft.fftfreq(Ny, dy_domain[Ny/2,Nx/2]))
+        #dk = np.diff(k)[0]*.5/np.pi
+        #dl = np.diff(l)[0]*.5/np.pi
+        k = fft.fftshift(fft.fftfreq(Nx, dx_domain[Ny/2,Nx/2]))
+        l = fft.fftshift(fft.fftfreq(Ny, dy_domain[Ny/2,Nx/2]))
+        dk = np.diff(k)[0]
+        dl = np.diff(l)[0]
 
         ###################################
         ###  Start looping through each time step  ####
         ###################################
         Nt = T.shape[0]
         Decor_lag = 13
-        tilde2_sum = np.zeros((Ny,Nx))
-        Ti2_sum = np.zeros((Ny,Nx))
+        tilde2_sum = np.zeros((Ny, Nx))
+        Ti2_sum = np.zeros((Ny, Nx))
         Days = np.arange(0,Nt,Decor_lag)
         Neff = len(Days)
         for n in Days:
@@ -596,21 +676,27 @@ class POPFile(object):
         breve2_sum = tilde2_sum/((Nx*Ny)**2*dk*dl)
         #breve2_ave = tilde2_ave/((Nx*Ny)**2*dk*dl)
         #spac2_ave = Ti2_sum/Nt
-        if land_fraction==0.:
+        if land_fraction == 0.:
             #np.testing.assert_almost_equal(breve2_ave.sum()/(dx_domain[Ny/2,Nx/2]*dy_domain[Ny/2,Nx/2]*(spac2_ave).sum()), 1., decimal=5)
-            np.testing.assert_almost_equal(breve2_sum.sum()/(dx_domain[Ny/2,Nx/2]*dy_domain[Ny/2,Nx/2]*(Ti2_sum).sum()), 1., decimal=5)
+            np.testing.assert_almost_equal( breve2_sum.sum() / ( dx_domain[Ny/2, Nx/2] * dy_domain[Ny/2, Nx/2] * (Ti2_sum).sum() ), 1., decimal=5)
             
         # step 10: derive the isotropic spectrum
         kk, ll = np.meshgrid(k, l)
-        K = np.sqrt(kk**2 + ll**2)
-        Ki = np.linspace(0, k.max(), nbins)
+        K = np.sqrt( kk**2 + ll**2 )
+        #Ki = np.linspace(0, k.max(), nbins)
+        if k.max() > l.max():
+            Ki = np.linspace(0, l.max(), nbins)
+        else:
+            Ki = np.linspace(0, k.max(), nbins)
         #Ki = np.linspace(0, K.max(), nbins)
         deltaKi = np.diff(Ki)[0]
         Kidx = np.digitize(K.ravel(), Ki)
         invalid = Kidx[-1]
         area = np.bincount(Kidx)
+        #PREVIOUS: isotropic_PSD = np.ma.masked_invalid(
+        #                               np.bincount(Kidx, weights=breve2_sum.ravel()) / area )[:-1] *Ki*2.*np.pi**2
         isotropic_PSD = np.ma.masked_invalid(
-                                       np.bincount(Kidx, weights=breve2_sum.ravel()) / area )[:-1] *Ki*2.*np.pi**2
+                                       np.bincount(Kidx, weights=breve2_sum.ravel()) / area )[:-1] * Ki
         #isotropic_PSD = np.ma.masked_invalid(
                                        #np.bincount(Kidx, weights=(breve2_ave).ravel()) / area )[1:] *Ki*2.*np.pi**2
         #isotropic_PSD = np.ma.masked_invalid(
@@ -634,7 +720,8 @@ class POPFile(object):
         #array([ 0.3,  0.7,  1.1])  <- [0.3, 0.5+0.2, 0.7+1.-0.6]
         
         # step 10: return the results
-        return Neff, Nt, Nx, Ny, k, l, Ti2_sum, tilde2_sum, breve2_sum, Ki, isotropic_PSD, area[1:], lon, lat, land_fraction, MAX_LAND
+        #PREVIOUS: return Neff, Nt, Nx, Ny, k, l, Ti2_sum, tilde2_sum, breve2_sum, Ki, isotropic_PSD, area[1:], lon, lat, land_fraction, MAX_LAND
+        return Neff, Nt, Nx, Ny, k, l, Ti2_sum, tilde2_sum, breve2_sum, Ki[:], isotropic_PSD[:], area[1:-1], lon, lat, land_fraction, MAX_LAND
         
     def structure_function(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', dxname='DXT', dyname='DYT', lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, q=2, MAX_LAND=0.01, xmin=0, xmax=0, ymin=0, ymax=0, ymin_bound=0, ymax_bound=0, xmin_bound=0, xmax_bound=0, detre=True, windw=True, iso=False, roll_param=True):
         """Calculate a structure function of Matlab variable 'varname'
