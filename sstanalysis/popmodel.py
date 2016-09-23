@@ -1,5 +1,5 @@
 import numpy as np
-import xray
+import xarray
 import netCDF4
 import warnings
 import sys
@@ -14,10 +14,10 @@ import gsw
 class POPFile(object):
     
     def __init__(self, fname, areaname='TAREA', maskname='KMT', hmax=None, 
-                 hconst=None, pref=0., ah=-3e17, am=-2.7e10, is3d=False):
+                 hconst=None, pref=0., ah=-3e9, am=-2.7e10, is3d=False):
         """Wrapper for POP model netCDF files"""
         #self.nc = netCDF4.Dataset(fname)
-        self.nc = xray.open_dataset(fname, decode_times=False)
+        self.nc = xarray.open_dataset(fname, decode_times=False)
         #self.Ny, self.Nx = self.nc.variables[areaname].shape  
         self.Ny, self.Nx = self.nc[areaname].shape  
         self._ah = ah
@@ -63,10 +63,6 @@ class POPFile(object):
         self.tarea = tarea
         tarea_r = np.ma.masked_invalid(tarea**-1).filled(0.)
         self.tarea_r = tarea_r
-        uarea = self.nc['UAREA'].values
-        self.uarea = uarea
-        uarea_r = np.ma.masked_invalid(uarea**-1).filled(0.)
-        self.uarea_r = uarea_r
         
         dxtr = 1e2 * self.nc['DXT'].values**-1
         self._dxtr = dxtr
@@ -122,7 +118,7 @@ class POPFile(object):
             # mixing coefficients
             #self._ah = -0.2e20*(1280.0/self.Nx)
             #j_eq = np.argmin(self.nc.variables['ULAT'][:,0]**2)
-            j_eq = np.argmin(self.nc['ULAT'][:,0]**2).values
+            j_eq = np.argmin(self.nc['ULAT'][:,0].values**2)
             #self._ahf = (tarea / self.nc.variables['UAREA'][j_eq,0])**1.5
             self._ahf = (tarea / self.nc['UAREA'].values[j_eq,0])**1.5
             self._ahf[self.mask] = 0.   
@@ -146,18 +142,23 @@ class POPFile(object):
         elif field == 'momentum':
             p5 = .5
             c2 = 2.
-            hus = self.nc['HUS'][:]
-            hte = self.nc['HTE'][:]
-            huw = self.nc['HUW'][:]
-            htn = self.nc['HTN'][:]
+            hus = self.nc['HUS'][:].values
+            hte = self.nc['HTE'][:].values
+            huw = self.nc['HUW'][:].values
+            htn = self.nc['HTN'][:].values
             kmu = self.nc['KMU'].values > 1
+            self.kmu = kmu
+            uarea = self.nc['UAREA'].values
+            self.uarea = uarea
+            uarea_r = np.ma.masked_invalid(uarea**-1).filled(0.)
+            self.uarea_r = uarea_r
             # coefficients for \nabla**2(U) (without metric terms)
-            work1 = (hus * hte**-1).values
+            work1 = hus * hte**-1
             dus = work1 * uarea_r
             self._dus = dus
             dun = np.roll(work1, 1, axis=0) * uarea_r
             self._dun = dun
-            work1 = (huw * htn**-1).values
+            work1 = huw * htn**-1
             duw = work1 * uarea_r
             self._duw = duw
             due = np.roll(work1, 1, axis=1) * uarea_r
@@ -181,11 +182,15 @@ class POPFile(object):
             kyu = (np.roll(hus, 1, axis=0) - hus) * uarea_r
             
             dum = - (dxkx + dyky + c2*(kxu**2 + kyu**2))
+            self._dum = dum
             dmc = dxky - dykx
+            self._dmc = dmc
             duc = - (dun + dus + due + duw)
+            self._duc = duc
             
             # coefficients for metric mixing terms which mix U,V.
-            self._cc = duc + dum
+            cc = duc + dum
+            self._cc = cc
             dme = c2*kyu * (htn + np.roll(htn, 1, axis=1))**-1
             self._dme = dme
             dmn = -c2*kxu * (hte + np.roll(hte, 1, axis=0))**-1
@@ -193,11 +198,11 @@ class POPFile(object):
             self._dmw = -dme
             self._dms = -dmn
             
-            j_eq = np.argmin(self.nc['ULAT'][:,0]**2).values
+            j_eq = np.argmin(self.nc['ULAT'][:,0].values**2)
             self._amf = (uarea / self.nc['UAREA'].values[j_eq, 0])**1.5
-            self._amf[self.mask] = 0. 
+            self._amf[~kmu] = 0. 
                 
-    def laplacian(self, T, field='tracer', V=self.nc['V1_1']):
+    def laplacian(self, T, field='tracer', V=0.):
         """Returns the laplacian"""
         #######
         # \nabla**2(T) at tracer points
@@ -210,12 +215,17 @@ class POPFile(object):
                 self._ce*np.roll(T,-1,axis=1) +
                 self._cw*np.roll(T,1,axis=1)          
             )
+            #return (
+                #self._cc*T +
+                #self._cn*T.roll(nlat=-1) + self._cs*T.roll(nlat=1) +
+                #self._ce*T.roll(nlon=-1) + self._cw*T.roll(nlon=1)          
+            #)
         #######
-        # \nabla**2(U, V) at momentum points
+        # \nabla**2(U or V) at momentum points
         #######
         elif field == 'momentum':
-            U = T
-            d2uk = self._cc * U +
+            U = T.copy()
+            u = (self._cc * U +
                 self._dun * np.roll(U, -1, axis=0) + 
                 self._dus * np.roll(U, 1, axis=0) + 
                 self._due * np.roll(U, -1, axis=1) + 
@@ -225,7 +235,8 @@ class POPFile(object):
                 self._dms * np.roll(V, 1, axis=0) + 
                 self._dme * np.roll(V, -1, axis=1) + 
                 self._dmw * np.roll(V, 1, axis=1)
-            d2vk = self._cc * V +
+                )
+            v = (self._cc * V +
                 self._dun * np.roll(V, -1, axis=0) + 
                 self._dus * np.roll(V, 1, axis=0) + 
                 self._due * np.roll(V, -1, axis=1) + 
@@ -235,15 +246,39 @@ class POPFile(object):
                 self._dms * np.roll(U, 1, axis=0) + 
                 self._dme * np.roll(U, -1, axis=1) + 
                 self._dmw * np.roll(U, 1, axis=1)
-            d2uk[~self.mask] = 0.
-            d2vk[~self.mask] = 0.
+                )
+            #if u.ndim == 3:
+                #for k in range(u.shape[0]):
+                    #u[k][~self.kmu] = 0.
+                    #v[k][~self.kmu] = 0.
+            #else:
+                #u[~self.kmu] = 0.
+                #v[~self.kmu] = 0.
             
-            return d2uk, d2vk
-        #return (
-            #self._cc*T +
-            #self._cn*T.roll(nlat=-1) + self._cs*T.roll(nlat=1) +
-            #self._ce*T.roll(nlon=-1) + self._cw*T.roll(nlon=1)          
-        #)
+            return u, v
+        
+    def biharmonic_tendency(self, T, field='tracer'):
+        """Calculate tendency due to biharmonic diffusion."""
+        #########
+        # tracer
+        #########
+        if field == 'tracer':
+            d2tk = self._ahf * self.laplacian(T, field=field)
+            return self._ah * self.laplacian(d2tk, field=field)
+        #########
+        # momentum
+        #########
+        elif field == 'momentum':
+            d2uk, d2vk = self._amf * self.laplacian(T, field=field, V=self.nc['V1_1'].values)
+            hduk, hdvk = self.laplacian(d2uk, field=field, V=d2vk)
+            if hduk.ndim == 3:
+                for k in range(hduk.shape[0]):
+                    hduk[k][~self.kmu] = 0.
+                    hdvk[k][~self.kmu] = 0.
+            else:
+                hduk[~self.kmu] = 0.
+                hdvk[~self.kmu] = 0.
+            return float(self._am) * np.asarray(hduk), float(self._am) * np.asarray(hdvk)
     
     def gradient_2d(self, varname='SST', lonname='ULONG', latname='ULAT', maskname='KMT', roll=0):
         """Return the gradient of tracer at velocity points
@@ -301,25 +336,6 @@ class POPFile(object):
                           - (np.roll(dyth, -1, axis=1) + dyth)
                           ) * uarea.copy()**-1
         return geou, geov
-    
-    def biharmonic_tendency(self, T, field='tracer', V=self.nc['V1_1']):
-        """Calculate tendency due to biharmonic diffusion."""
-        #########
-        # tracer
-        #########
-        if field == 'tracer':
-            d2tk = self._ahf * self.laplacian(T, field=field)
-            return self._ah * self.laplacian(d2tk, field=field)
-        #########
-        # momentum
-        #########
-        elif field == 'momentum':
-            d2uk, d2vk = self._amf * self.laplacian(T, field=field, V=V)
-            hduk =  = self._am * self.laplacian(d2uk, field=field, V=d2vk)
-            hdvk =  = self._am * self.laplacian(d2vk, field=field, V=d2uk)
-            hduk[~self.mask] = 0.
-            hdvk[~self.mask] = 0.
-            return hduk, hdvk
         
     def horizontal_flux_divergence(self, hfluxe, hfluxn):
         """Designed to be used with diagnostics such as DIFE_*, DIFN_*.
@@ -1217,7 +1233,6 @@ def get_surface_ts(nc, i):
 
 class TSForcing(EOSCalculator):
     def __getitem__(self, i):
-        #T0, S0 = get_surface_ts(self.nc, i)
         #Ffw = self.nc.variables[self.fwfname].__getitem__(i)
         #Qhf = self.nc.variables[self.hfname].__getitem__(i)
         Ffw = self.nc[self.fwfname].values.__getitem__(i)      #Fresh Water flux "kg/m^2/s"
@@ -1282,7 +1297,7 @@ class UVDissipation(EOSCalculator):
             if self.hmax is not None:
                 H_ml = np.ma.masked_greater(H_ml, self.hmax).filled(self.hmax)
         
-        FU_mix, FV_mix = H_ml * self.parent.biharmonic_tendency(U0, field='momentum', V=V0)
+        FU_mix, FV_mix = H_ml * self.parent.biharmonic_tendency(U0, field='momentum')
         
         return [ np.ma.masked_array(F, self.parent.mask) 
                  for F in [FU_mix, FV_mix] ]  
