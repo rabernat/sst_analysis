@@ -14,8 +14,9 @@ import gsw
 class POPFile(object):
     
     def __init__(self, fname, areaname='TAREA', maskname='KMT', hmax=None, 
-                 hconst=None, pref=0., ah=-3e9, am=-2.7e10, is3d=False):
-        """Wrapper for POP model netCDF files"""
+                 hconst=None, pref=0., ah=-3e17, am=-2.7e18, is3d=False):
+        """Wrapper for POP model netCDF files. The units are in [centimeters]
+        """
         #self.nc = netCDF4.Dataset(fname)
         self.nc = xarray.open_dataset(fname, decode_times=False)
         #self.Ny, self.Nx = self.nc.variables[areaname].shape  
@@ -58,20 +59,22 @@ class POPFile(object):
         return T.where( mask>1 )
         
     def initialize_gradient_operator(self, field='tracer'):
-        """Needs to be called before calculating gradients"""
-        tarea = self.nc['TAREA'].values
+        """Needs to be called before calculating gradients
+        """
+        tarea = self.nc.TAREA.values
         self.tarea = tarea
         tarea_r = np.ma.masked_invalid(tarea**-1).filled(0.)
         self.tarea_r = tarea_r
-        
-        dxtr = 1e2 * self.nc['DXT'].values**-1
-        self._dxtr = dxtr
-        dytr = 1e2 * self.nc['DYT'].values**-1
-        self._dytr = dytr
-        dxur = 1e2 * self.nc['DXU'].values**-1
-        self._dxur = dxur
-        dyur = 1e2 * self.nc['DYU'].values**-1
-        self._dyur = dyur
+
+        dxt_r = self.nc.DXT.values**-1
+        self.dxt_r = dxt_r
+        dyt_r = self.nc.DYT.values**-1
+        self.dyt_r = dyt_r
+        dxu_r = self.nc.DXU.values**-1
+        self.dxu_r = dxu_r
+        dyu_r = self.nc.DYU.values**-1
+        self.dyu_r = dyu_r
+
         
         ############
         # Tracer
@@ -148,11 +151,16 @@ class POPFile(object):
             htn = self.nc['HTN'][:].values
             kmu = self.nc['KMU'].values > 1
             self.kmu = kmu
-            uarea = self.nc['UAREA'].values
+
+            uarea = self.nc.UAREA.values
             self.uarea = uarea
             uarea_r = np.ma.masked_invalid(uarea**-1).filled(0.)
             self.uarea_r = uarea_r
+
+
+            ###########
             # coefficients for \nabla**2(U) (without metric terms)
+            ###########
             work1 = hus * hte**-1
             dus = work1 * uarea_r
             self._dus = dus
@@ -163,123 +171,145 @@ class POPFile(object):
             self._duw = duw
             due = np.roll(work1, 1, axis=1) * uarea_r
             self._due = due
-            
-            # coefficients for metric terms in \nabla**2(U)
-            # North-South
-            work1 = (htn - np.roll(htn, -1, axis=0))
-            work2 = np.roll(work1, 1, axis=0) - work1
-            dyky = p5 * (work2 + np.roll(work2, 1, axis=1)) * dyur
-            work2 = np.roll(work1, 1, axis=1) - work1
-            dxky = p5 * (work2 + np.roll(work2, 1, axis=0)) * dxur
-            #East-West
-            work1 = (hte - np.roll(hte, -1, axis=0)) * tarea_r
-            work2 = np.roll(work1, 1, axis=0) - work1
-            dxkx = p5 * (work2 + np.roll(work2, 1, axis=0)) * dxur
-            work2 = np.roll(work1, 1, axis=0) - work1
-            dykx = p5 * (work2 + np.roll(work2, 1, axis=1)) * dyur
-            
+
+            ###########
+            # coefficients for metric terms in \nabla**2(U, V)
+            ###########
             kxu = (np.roll(huw, 1, axis=1) - huw) * uarea_r
             kyu = (np.roll(hus, 1, axis=0) - hus) * uarea_r
-            
+
+            #East-West
+            work1 = (hte - np.roll(hte, -1, axis=0)) * tarea_r
+            work2 = np.roll(work1, 1, axis=1) - work1
+            dxkx = p5 * (work2 + np.roll(work2, 1, axis=0)) * dxu_r
+            self._dxkx = dxkx
+            work2 = np.roll(work1, 1, axis=0) - work1
+            dykx = p5 * (work2 + np.roll(work2, 1, axis=1)) * dyu_r
+            self._dykx = dykx
+
+            # North-South
+            work1 = (htn - np.roll(htn, -1, axis=0)) * tarea_r
+            work2 = np.roll(work1, 1, axis=0) - work1
+            dyky = p5 * (work2 + np.roll(work2, 1, axis=1)) * dyu_r
+            self._dyky = dyky
+            work2 = np.roll(work1, 1, axis=1) - work1
+            dxky = p5 * (work2 + np.roll(work2, 1, axis=0)) * dxu_r
+            self._dxky = dxky
+
+
             dum = - (dxkx + dyky + c2*(kxu**2 + kyu**2))
             self._dum = dum
             dmc = dxky - dykx
             self._dmc = dmc
-            duc = - (dun + dus + due + duw)
-            self._duc = duc
-            
+
+
+            ###########      
             # coefficients for metric mixing terms which mix U,V.
-            cc = duc + dum
-            self._cc = cc
+            ###########
             dme = c2*kyu * (htn + np.roll(htn, 1, axis=1))**-1
             self._dme = dme
             dmn = -c2*kxu * (hte + np.roll(hte, 1, axis=0))**-1
             self._dmn = dmn
-            self._dmw = -dme
-            self._dms = -dmn
+
+            duc = - (dun + dus + due + duw)
+            self._duc = duc
+            dmw = -dme
+            self._dmw = dmw
+            dms = -dmn
+            self._dms = dms
+            
+            cc = duc + dum
+            self._cc = cc
             
             j_eq = np.argmin(self.nc['ULAT'][:,0].values**2)
-            self._amf = (uarea / self.nc['UAREA'].values[j_eq, 0])**1.5
-            self._amf[~kmu] = 0. 
+            self._amf = np.ma.masked_array((uarea 
+                                            / self.nc['UAREA'].values[j_eq, 0])**1.5, ~kmu).filled(0.)
                 
-    def laplacian(self, T, field='tracer', V=0.):
-        """Returns the laplacian"""
-        #######
-        # \nabla**2(T) at tracer points
-        #######
-        if field == 'tracer':
-            return (
-                self._cc*T +
-                self._cn*np.roll(T,-1,axis=0) +
-                self._cs*np.roll(T,1,axis=0) +
-                self._ce*np.roll(T,-1,axis=1) +
-                self._cw*np.roll(T,1,axis=1)          
-            )
-            #return (
-                #self._cc*T +
-                #self._cn*T.roll(nlat=-1) + self._cs*T.roll(nlat=1) +
-                #self._ce*T.roll(nlon=-1) + self._cw*T.roll(nlon=1)          
-            #)
-        #######
-        # \nabla**2(U or V) at momentum points
-        #######
-        elif field == 'momentum':
-            U = T.copy()
-            u = (self._cc * U +
-                self._dun * np.roll(U, -1, axis=0) + 
-                self._dus * np.roll(U, 1, axis=0) + 
-                self._due * np.roll(U, -1, axis=1) + 
-                self._duw * np.roll(U, 1, axis=1) +
-                self._dmc * V + 
-                self._dmn * np.roll(V, -1, axis=0) + 
-                self._dms * np.roll(V, 1, axis=0) + 
-                self._dme * np.roll(V, -1, axis=1) + 
-                self._dmw * np.roll(V, 1, axis=1)
-                )
-            v = (self._cc * V +
-                self._dun * np.roll(V, -1, axis=0) + 
-                self._dus * np.roll(V, 1, axis=0) + 
-                self._due * np.roll(V, -1, axis=1) + 
-                self._duw * np.roll(V, 1, axis=1) +
-                self._dmc * U + 
-                self._dmn * np.roll(U, -1, axis=0) + 
-                self._dms * np.roll(U, 1, axis=0) + 
-                self._dme * np.roll(U, -1, axis=1) + 
-                self._dmw * np.roll(U, 1, axis=1)
-                )
-            #if u.ndim == 3:
-                #for k in range(u.shape[0]):
-                    #u[k][~self.kmu] = 0.
-                    #v[k][~self.kmu] = 0.
-            #else:
-                #u[~self.kmu] = 0.
-                #v[~self.kmu] = 0.
+    def _scalar_laplacian(self, T):
+        """ \nabla**2(T) at tracer points
+        """
+        return (
+            self._cc*T +
+            self._cn*np.roll(T,-1,axis=0) +
+            self._cs*np.roll(T,1,axis=0) +
+            self._ce*np.roll(T,-1,axis=1) +
+            self._cw*np.roll(T,1,axis=1)          
+        )
             
-            return u, v
-        
-    def biharmonic_tendency(self, T, field='tracer'):
-        """Calculate tendency due to biharmonic diffusion."""
-        #########
-        # tracer
-        #########
-        if field == 'tracer':
-            d2tk = self._ahf * self.laplacian(T, field=field)
-            return self._ah * self.laplacian(d2tk, field=field)
-        #########
-        # momentum
-        #########
-        elif field == 'momentum':
-            d2uk, d2vk = self._amf * self.laplacian(T, field=field, V=self.nc['V1_1'].values)
-            hduk, hdvk = self.laplacian(d2uk, field=field, V=d2vk)
-            if hduk.ndim == 3:
-                for k in range(hduk.shape[0]):
-                    hduk[k][~self.kmu] = 0.
-                    hdvk[k][~self.kmu] = 0.
-            else:
-                hduk[~self.kmu] = 0.
-                hdvk[~self.kmu] = 0.
-            return float(self._am) * np.asarray(hduk), float(self._am) * np.asarray(hdvk)
+    def _vector_laplacian(self, U, V):
+        """ \nabla**2(U or V) at momentum points
+        """
+        lap_u = (self._cc * U +
+            self._dun * np.roll(U, -1, axis=0) + 
+            self._dus * np.roll(U, 1, axis=0) + 
+            self._due * np.roll(U, -1, axis=1) + 
+            self._duw * np.roll(U, 1, axis=1) +
+            self._dmc * V + 
+            self._dmn * np.roll(V, -1, axis=0) + 
+            self._dms * np.roll(V, 1, axis=0) + 
+            self._dme * np.roll(V, -1, axis=1) + 
+            self._dmw * np.roll(V, 1, axis=1)
+            )
+        lap_v = (self._cc * V +
+            self._dun * np.roll(V, -1, axis=0) + 
+            self._dus * np.roll(V, 1, axis=0) + 
+            self._due * np.roll(V, -1, axis=1) + 
+            self._duw * np.roll(V, 1, axis=1) +
+            self._dmc * U + 
+            self._dmn * np.roll(U, -1, axis=0) + 
+            self._dms * np.roll(U, 1, axis=0) + 
+            self._dme * np.roll(U, -1, axis=1) + 
+            self._dmw * np.roll(U, 1, axis=1)
+            )
+        if lap_u.ndim == 3:
+            for t in range(lap_u.shape[0]):
+                lap_u[t] = np.ma.masked_array(lap_u[t], ~self.kmu).filled(0.)
+                lap_v[t] = np.ma.masked_array(lap_v[t], ~self.kmu).filled(0.)
+        else:
+            lap_u = np.ma.masked_array(lap_u, ~self.kmu).filled(0.)
+            lap_v = np.ma.masked_array(lap_v, ~self.kmu).filled(0.)
+            
+        return lap_u, lap_v
     
+    def laplacian(self, field, *args):
+        """Returns the laplacian
+        """
+        if field == 'tracer':
+            assert len(args)==1
+            T = args[0]
+            return self._scalar_laplacian(T)
+        elif field == 'momentum':
+            assert len(args)==2
+            U, V = args
+            return self._vector_laplacian(U, V)
+        else:
+            raise ValueError('field should be either tracer or momentum')
+        
+    def biharmonic_tendency(self, field, *args):
+        """Calculate tendency due to biharmonic diffusion.
+            Return the values in units [cm^2/s^2]
+        """
+        if field == 'tracer':
+            assert len(args)==1
+            T = args[0]
+            d2tk = self._ahf * self.laplacian(field, T)
+            return self._ah * self.laplacian(field, d2tk)
+        elif field == 'momentum':
+            assert len(args)==2
+            U, V = args
+            d2uk, d2vk = [self._amf * t for t in self.laplacian(field, U, V)]
+            hduk, hdvk = [self._am * t for t in self.laplacian(field, d2uk, d2vk)]
+            if hduk.ndim == 3:
+                for t in range(hduk.shape[0]):
+                    hduk[t] = np.ma.masked_array(hduk[t], ~self.kmu).filled(0.)
+                    hdvk[t] = np.ma.masked_array(hduk[t], ~self.kmu).filled(0.)
+            else:
+                hduk = np.ma.masked_array(hduk, ~self.kmu).filled(0.)
+                hdvk = np.ma.masked_array(hduk, ~self.kmu).filled(0.)
+            return hduk, hdvk
+        else:
+            raise ValueError('field should be either tracer or momentum')
+                
     def gradient_2d(self, varname='SST', lonname='ULONG', latname='ULAT', maskname='KMT', roll=0):
         """Return the gradient of tracer at velocity points
             for the global field
@@ -488,18 +518,22 @@ class POPFile(object):
         Nx = imax - imin
         Ny = jmax - jmin
 
-        dx = 1e-2 * self.nc[dxname][:].roll( nlon=roll ).values[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
-        dy = 1e-2 * self.nc[dyname][:].roll( nlon=roll ).values[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+        dx = 1e-2 * (self.nc[dxname][:].roll( nlon=roll ).values[
+                jmin_bound:jmax_bound+100, imin_bound:imax_bound+100])
+        dy = 1e-2 * (self.nc[dyname][:].roll( nlon=roll ).values[
+                jmin_bound:jmax_bound+100, imin_bound:imax_bound+100])
         if advt:
-            dxu = 1e-2 * self.nc['DXU'][:].roll( nlon=roll ).values[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
-            dyu = 1e-2 * self.nc['DYU'][:].roll( nlon=roll ).values[jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+            dxu = 1e-2 * (self.nc['DXU'][:].roll( nlon=roll ).values[
+                    jmin_bound:jmax_bound+100, imin_bound:imax_bound+100])
+            dyu = 1e-2 * (self.nc['DYU'][:].roll( nlon=roll ).values[
+                    jmin_bound:jmax_bound+100, imin_bound:imax_bound+100])
 
         ##############
         # step 2: load the data
         ##############
-        if varname=='SST' or varname=='SSS':
+        if varname=='SST' or varname=='SSS' or varname=='U1_1' or varname=='V1_1':
             T = ( self.nc[varname].roll( nlon=roll ).values[:, 
-                                                              jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
+                                         jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
             
             if advt:
                 geoU = self.nc['geou'][:].roll( nlon=roll ).values[:, jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
@@ -1255,7 +1289,7 @@ class TSDissipation(EOSCalculator):
             H_ml = self.hconst
         else:
             #H_ml = self.nc.variables[self.mlname].__getitem__(i)/100.
-            H_ml = self.nc[self.mlname].__getitem__(i) / 100.
+            H_ml = self.nc[self.mlname].__getitem__(i)
             if self.hmax is not None:
                 H_ml = np.ma.masked_greater(H_ml, self.hmax).filled(self.hmax)
         
@@ -1270,20 +1304,20 @@ class TSDissipation(EOSCalculator):
 # momentum dissipation
 #############################################
 def get_surface_uv(nc, i):
+    """Get the surface velocities: units in [cm/s]
+    """
     try:
-        #S0 = nc.variables['SSS'].__getitem__(i)
-        #T0 = nc.variables['SST'].__getitem__(i)
         U0 = nc['U1_1'].values.__getitem__(i)
         V0 = nc['V1_1'].values.__getitem__(i)
     except KeyError:
-        #S0 = nc.variables['SALT'][:,0,:,:].__getitem__(i)
-        #T0 = nc.variables['TEMP'][:,0,:,:].__getitem__(i) 
         U0 = nc['UVEL'][:, 0, :, :].values.__getitem__(i)
         V0 = nc['VVEL'][:, 0, :, :].values.__getitem__(i) 
     return U0, V0
 
 class UVDissipation(EOSCalculator):
     def __getitem__(self, i):
+        """Calculates the momentum dissipation term
+        """
         U0, V0 = get_surface_uv(self.nc, i) 
     
         ###########
@@ -1293,11 +1327,11 @@ class UVDissipation(EOSCalculator):
             H_ml = self.hconst
         else:
             #H_ml = self.nc.variables[self.mlname].__getitem__(i)/100.
-            H_ml = self.nc[self.mlname].__getitem__(i) / 100.
+            H_ml = self.nc[self.mlname].__getitem__(i)
             if self.hmax is not None:
                 H_ml = np.ma.masked_greater(H_ml, self.hmax).filled(self.hmax)
         
-        FU_mix, FV_mix = H_ml * self.parent.biharmonic_tendency(U0, field='momentum')
+        FU_mix, FV_mix = [H_ml * t for t in self.parent.biharmonic_tendency('momentum', U0, V0)]
         
         return [ np.ma.masked_array(F, self.parent.mask) 
                  for F in [FU_mix, FV_mix] ]  
