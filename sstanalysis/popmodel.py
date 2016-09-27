@@ -517,7 +517,7 @@ class POPFile(object):
         
         return Ti
     
-    def _spectra(T, days, k, l, mask, MAX_LAND=0.01, nbins=64, demean=False):
+    def _spectra(self, T, days, dx, dy, k, l, mask, MAX_LAND, nbins, demean):
         """Calculate a isotropic wavenumber spectrum of T
         """
         #############
@@ -648,9 +648,9 @@ class POPFile(object):
         # step 11: return the results
         ############
             #PREVIOUS: return Neff, Nt, Nx, Ny, k, l, Ti2_sum, tilde2_sum, breve2_sum, Ki, isotropic_PSD, area[1:], lon, lat, land_fraction, MAX_LAND
-        return k, l, iso_wv, isotropic_PSD[:], area[:-1]
+        return len(days), k, l, iso_wv, isotropic_PSD[:], area[:-1]
     
-    def _cross_spectra(T, P, days, k, l, mask, MAX_LAND=0.01, nbins=64, demean=False):
+    def _cross_spectra(self, T, P, days, dx, dy, k, l, mask, MAX_LAND, nbins, demean):
         """Calculates a isotropic wavenumber cross spectrum of T and P.
         """
         #############
@@ -787,10 +787,12 @@ class POPFile(object):
         # step 11: return the results
         ############
             #PREVIOUS: return Neff, Nt, Nx, Ny, k, l, Ti2_sum, tilde2_sum, breve2_sum, Ki, isotropic_PSD, area[1:], lon, lat, land_fraction, MAX_LAND
-        return k, l, iso_wv, isotropic_PSD[:], area[:-1]
+        return len(days), k, l, iso_wv, isotropic_PSD[:], area[:-1]
     
-    def spectrum_2d(self, maskname, dxname, dyname, tend, detrend, demean, roll, nbins, MAX_LAND, 
-                    xmin, xmax, ymin, ymax, ymin_bound, ymax_bound, xmin_bound, xmax_bound, daylag, daystart, *args):
+    def iso_wvnum_spectra(self, maskname, dxname, dyname, demean, roll, nbins, MAX_LAND, 
+                    xmin, xmax, ymin, ymax, 
+                    ymin_bound, ymax_bound, xmin_bound, xmax_bound, 
+                    daylag, daystart, *args):
         """Calculates a isotropic wavenumber power spectrum of the variables prescribed in *args
             for the box defined (xmin_bound, xmax_bound) and (ymin_bound, ymax_bound).
         """
@@ -809,9 +811,9 @@ class POPFile(object):
         Nx = imax - imin
         Ny = jmax - jmin
 
-        dx = 1e-2 * (self.nc[dxname][:].roll( nlon=roll ).values[
+        dx = 1e-2 * (self.nc[dxname].where(~mask).roll( nlon=roll ).values[
                 jmin_bound:jmax_bound+100, imin_bound:imax_bound+100])
-        dy = 1e-2 * (self.nc[dyname][:].roll( nlon=roll ).values[
+        dy = 1e-2 * (self.nc[dyname].where(~mask).roll( nlon=roll ).values[
                 jmin_bound:jmax_bound+100, imin_bound:imax_bound+100])
 
         ##############
@@ -822,52 +824,19 @@ class POPFile(object):
             Tname = args[0]
         elif len(args) == 2:
             assert len(args) == 2
-            Tname, Pname = args
-            P = ( self.nc[Pname].roll( nlon=roll ).values[:,
+            Tname = args[0]
+            Pname = args[1]
+            P = ( self.nc[Pname].where(~mask).roll( nlon=roll ).values[:,
                                          jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
         else:
             raise ValueError('The length of args should be either one or two')
             
         if Tname=='SST' or Tname=='SSS':
-            T = ( self.nc[varname].roll( nlon=roll ).values[:, 
+            T = ( self.nc[Tname].where(~mask).roll( nlon=roll ).values[:, 
                                          jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
             
-            #if advt:
-                #geoU = self.nc['geou'][:].roll( nlon=roll ).values[:, jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
-                #geoV = self.nc['geov'][:].roll( nlon=roll ).values[:, jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
-                #U = 1e-2 * ( self.nc['U1_1'].where(~maskU).roll( nlon=roll ).values[:, 
-                #                                            jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
-                #V = 1e-2 * ( self.nc['V1_1'].where(~maskU).roll( nlon=roll ).values[:,
-                #                                            jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
-                #tarea = 1e-4 * ( self.nc['TAREA'].where(~mask).roll( nlon=roll ).values[
-                #                                            jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
-                #if self.hconst is not None:
-                #    Hmli = self.hconst
-                #else:
-                #    Hml = 1e-2 * ( self.nc['HMXL_2'].roll( nlon=roll ).values[:,
-                #                                            jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
-
-                # terms in advection
-                #U = 1e-2 * self.nc[uname].roll( nlon=roll )
-                #V = 1e-2 * self.nc[vname].roll( nlon=roll )
-                #dTdx = self.nc[gradxname].roll( nlon=roll )
-                #dTdy = self.nc[gradyname].roll( nlon=roll )
-                #adv = U * dTdx + V * dTdy
-                # give advection term at tracer points
-                #P = .5 * ( .5 * ((adv).roll(nlat=-1) + (adv)).roll(nlon=-1).values 
-                #                  + .5 * ((adv).roll(nlat=-1) + (adv).values) 
-                #          )[:, jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
-                #if self.hconst is not None:
-                    #H_ml = self.hconst
-                #else:
-                    #H_ml = self.nc.variables[self.mlname].__getitem__(i)/100.
-                    #H_ml = self.nc['HMXL_2'] / 1e2
-                    #if self.hmax is not None:
-                        #H_ml = np.ma.masked_greater(H_ml, self.hmax).filled(self.hmax)
-                #P = (self.nc[advname] * H_ml).roll( nlon=roll ).values[:, jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
-            
         elif Tname=='SSH_2' or Tname=='U1_1' or Tname=='V1_1':
-            T = 1e-2 * (self.nc[varname].roll( nlon=roll ).values[:, 
+            T = 1e-2 * (self.nc[Tname].where(~mask).roll( nlon=roll ).values[:, 
                                                   jmin_bound:jmax_bound+100, imin_bound:imax_bound+100])
         else:
             raise ValueError('The field you prescribed does not exist')
@@ -914,11 +883,13 @@ class POPFile(object):
         Nt = T.shape[0]
         Days = np.arange(daystart, Nt, daylag)
         Neff = len(Days)
+        Ti = T[:, jmin:jmax, imin:imax].copy()
         
         if len(args) == 1:
-            return _spectra(T, Days, k, l, mask, MAX_LAND, nbins, demean)
-        elif len(args) == 1:
-            return _cross_spectra(T, P, Days, k, l, mask, MAX_LAND, nbins, demean)
+            return self._spectra(Ti, Days, dx_domain, dy_domain, k, l, region_mask, MAX_LAND, nbins, demean)
+        elif len(args) == 2:
+            Pi = P[:, jmin:jmax, imin:imax].copy()
+            return self._cross_spectra(Ti, Pi, Days, dx_domain, dy_domain, k, l, region_mask, MAX_LAND, nbins, demean)
         
     def structure_function(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', dxname='DXT', dyname='DYT', lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, q=2, MAX_LAND=0.01, Decor_lag = 13, xmin=0, xmax=0, ymin=0, ymax=0, ymin_bound=0, ymax_bound=0, xmin_bound=0, xmax_bound=0, detre=True, windw=True, iso=False, roll_param=True):
         """Calculate a structure function of Matlab variable 'varname'
