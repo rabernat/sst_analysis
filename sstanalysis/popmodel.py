@@ -517,9 +517,8 @@ class POPFile(object):
         
         return Ti
     
-    def _spectra(T, Nt, k, l, mask, MAX_LAND=0.01, nbins=64, demean=False):
-        """Calculate a two-dimensional power spectrum of netcdf variable 'varname'
-            in the box defined by lonrange and latrange.
+    def _spectra(T, days, k, l, mask, MAX_LAND=0.01, nbins=64, demean=False):
+        """Calculate a isotropic wavenumber spectrum of T
         """
         #############
         # step 1: figure out if there is too much land in the box
@@ -553,7 +552,7 @@ class POPFile(object):
         spac2_sum = np.zeros((Ny, Nx))
         tilde2_sum = np.zeros((Ny, Nx))
 
-        for n in range(Nt):
+        for n in days:
     #         print n
             Ti = np.ma.masked_invalid( np.ma.masked_array(T[n].copy(), mask) )
 
@@ -561,7 +560,7 @@ class POPFile(object):
             # step 5: interpolate the missing data (only if necessary)
             ##############
             if land_fraction > 0. and land_fraction < MAX_LAND:
-                Ti = interpolate_2d(Ti)
+                Ti = _interpolate_2d(Ti)
             elif land_fraction==0.:
                 # no problem
                 pass
@@ -571,7 +570,7 @@ class POPFile(object):
             ###############
             # step 6: detrend the data in two dimensions (least squares plane fit)
             ###############
-            Ti = detrend_2d(Ti)
+            Ti = _detrend_2d(Ti)
             if demean:
                 Ti -= Ti.mean()
 
@@ -651,9 +650,8 @@ class POPFile(object):
             #PREVIOUS: return Neff, Nt, Nx, Ny, k, l, Ti2_sum, tilde2_sum, breve2_sum, Ki, isotropic_PSD, area[1:], lon, lat, land_fraction, MAX_LAND
         return k, l, iso_wv, isotropic_PSD[:], area[:-1]
     
-    def _cross_spectra(T, P, Nt, k, l, mask, MAX_LAND=0.01, nbins=64, demean=False):
-        """Calculate a two-dimensional power spectrum of netcdf variable 'varname'
-            in the box defined by lonrange and latrange.
+    def _cross_spectra(T, P, days, k, l, mask, MAX_LAND=0.01, nbins=64, demean=False):
+        """Calculates a isotropic wavenumber cross spectrum of T and P.
         """
         #############
         # step 1: figure out if there is too much land in the box
@@ -687,7 +685,7 @@ class POPFile(object):
         spac2_sum = np.zeros((Ny, Nx))
         tilde2_sum = np.zeros((Ny, Nx))
 
-        for n in range(Nt):
+        for n in days:
     #         print n
             Ti = np.ma.masked_invalid( np.ma.masked_array(T[n].copy(), mask) )
             Pi = np.ma.masked_invalid( np.ma.masked_array(P[n].copy(), mask) )
@@ -696,8 +694,8 @@ class POPFile(object):
             # step 5: interpolate the missing data (only if necessary)
             ##############
             if land_fraction > 0. and land_fraction < MAX_LAND:
-                Ti = interpolate_2d(Ti)
-                Pi = interpolate_2d(Pi)
+                Ti = _interpolate_2d(Ti)
+                Pi = _interpolate_2d(Pi)
             elif land_fraction==0.:
                 # no problem
                 pass
@@ -707,8 +705,8 @@ class POPFile(object):
             ###############
             # step 6: detrend the data in two dimensions (least squares plane fit)
             ###############
-            Ti = detrend_2d(Ti)
-            Pi = detrend_2d(Pi)
+            Ti = _detrend_2d(Ti)
+            Pi = _detrend_2d(Pi)
             if demean:
                 Ti -= Ti.mean()
                 Pi -= Pi.mean()
@@ -791,9 +789,10 @@ class POPFile(object):
             #PREVIOUS: return Neff, Nt, Nx, Ny, k, l, Ti2_sum, tilde2_sum, breve2_sum, Ki, isotropic_PSD, area[1:], lon, lat, land_fraction, MAX_LAND
         return k, l, iso_wv, isotropic_PSD[:], area[:-1]
     
-    def spectrum_2d(self, varname='SST', tendname='Tdiss', advname='Tadv', maskname='KMT', dxname='DXT', dyname='DYT', advt=False, tend=False, detrend=True, demean=False, filename=False, geosx=False, geosy=False, grady=False, roll=-1000, nbins=128, MAX_LAND=0.01, xmin=0, xmax=0, ymin=0, ymax=0, ymin_bound=0, ymax_bound=0, xmin_bound=0, xmax_bound=0, daylag=13, daystart=0):
-        """Calculate a two-dimensional power spectrum of netcdf variable 'varname'
-            in the box defined by lonrange and latrange.
+    def spectrum_2d(self, maskname, dxname, dyname, tend, detrend, demean, roll, nbins, MAX_LAND, 
+                    xmin, xmax, ymin, ymax, ymin_bound, ymax_bound, xmin_bound, xmax_bound, daylag, daystart, *args):
+        """Calculates a isotropic wavenumber power spectrum of the variables prescribed in *args
+            for the box defined (xmin_bound, xmax_bound) and (ymin_bound, ymax_bound).
         """
         jmin_bound = ymin_bound
         jmax_bound = ymax_bound
@@ -801,8 +800,6 @@ class POPFile(object):
         imax_bound = xmax_bound
 
         mask = self.nc[maskname] <= 1
-        if advt or varname == 'V1_1' or varname == 'U1_1':
-            maskU = self.nc['KMU'] <= 1
 
         # step 1: figure out the box indices
         imax = xmax
@@ -816,33 +813,39 @@ class POPFile(object):
                 jmin_bound:jmax_bound+100, imin_bound:imax_bound+100])
         dy = 1e-2 * (self.nc[dyname][:].roll( nlon=roll ).values[
                 jmin_bound:jmax_bound+100, imin_bound:imax_bound+100])
-        if advt:
-            dxu = 1e-2 * (self.nc['DXU'][:].roll( nlon=roll ).values[
-                    jmin_bound:jmax_bound+100, imin_bound:imax_bound+100])
-            dyu = 1e-2 * (self.nc['DYU'][:].roll( nlon=roll ).values[
-                    jmin_bound:jmax_bound+100, imin_bound:imax_bound+100])
 
         ##############
         # step 2: load the data
         ##############
-        if varname=='SST' or varname=='SSS' or varname=='U1_1' or varname=='V1_1':
+        if len(args) == 1:
+            assert len(args) == 1
+            Tname = args[0]
+        elif len(args) == 2:
+            assert len(args) == 2
+            Tname, Pname = args
+            P = ( self.nc[Pname].roll( nlon=roll ).values[:,
+                                         jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
+        else:
+            raise ValueError('The length of args should be either one or two')
+            
+        if Tname=='SST' or Tname=='SSS':
             T = ( self.nc[varname].roll( nlon=roll ).values[:, 
                                          jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
             
-            if advt:
-                geoU = self.nc['geou'][:].roll( nlon=roll ).values[:, jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
-                geoV = self.nc['geov'][:].roll( nlon=roll ).values[:, jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
-                U = 1e-2 * ( self.nc['U1_1'].where(~maskU).roll( nlon=roll ).values[:, 
-                                                            jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
-                V = 1e-2 * ( self.nc['V1_1'].where(~maskU).roll( nlon=roll ).values[:,
-                                                            jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
-                tarea = 1e-4 * ( self.nc['TAREA'].where(~mask).roll( nlon=roll ).values[
-                                                            jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
-                if self.hconst is not None:
-                    Hmli = self.hconst
-                else:
-                    Hml = 1e-2 * ( self.nc['HMXL_2'].roll( nlon=roll ).values[:,
-                                                            jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
+            #if advt:
+                #geoU = self.nc['geou'][:].roll( nlon=roll ).values[:, jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+                #geoV = self.nc['geov'][:].roll( nlon=roll ).values[:, jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
+                #U = 1e-2 * ( self.nc['U1_1'].where(~maskU).roll( nlon=roll ).values[:, 
+                #                                            jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
+                #V = 1e-2 * ( self.nc['V1_1'].where(~maskU).roll( nlon=roll ).values[:,
+                #                                            jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
+                #tarea = 1e-4 * ( self.nc['TAREA'].where(~mask).roll( nlon=roll ).values[
+                #                                            jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
+                #if self.hconst is not None:
+                #    Hmli = self.hconst
+                #else:
+                #    Hml = 1e-2 * ( self.nc['HMXL_2'].roll( nlon=roll ).values[:,
+                #                                            jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
 
                 # terms in advection
                 #U = 1e-2 * self.nc[uname].roll( nlon=roll )
@@ -862,49 +865,21 @@ class POPFile(object):
                     #if self.hmax is not None:
                         #H_ml = np.ma.masked_greater(H_ml, self.hmax).filled(self.hmax)
                 #P = (self.nc[advname] * H_ml).roll( nlon=roll ).values[:, jmin_bound:jmax_bound+100, imin_bound:imax_bound+100]
-                
-            elif tend:
-                P = ( self.nc[tendname].roll( nlon=roll ).values[:,
-                                              jmin_bound:jmax_bound+100, imin_bound:imax_bound+100] )
-            elif advt and tend:
-                raise ValueError('You should be only calculating either advection OR dissipation term')
             
-        elif varname=='SSH_2':
+        elif Tname=='SSH_2' or Tname=='U1_1' or Tname=='V1_1':
             T = 1e-2 * (self.nc[varname].roll( nlon=roll ).values[:, 
                                                   jmin_bound:jmax_bound+100, imin_bound:imax_bound+100])
-            if geosy:
-                barTy = .5*(np.roll(T,1,axis=1)+T)
-                T = - gfd.g / gfd.f_coriolis(tlat) * (np.roll(barTy,1,axis=2)-barTy) / dx
-            elif geosx:
-                barTx = .5*(np.roll(T,1,axis=2)+T)
-                T = gfd.g / gfd.f_coriolis(tlat) * (np.roll(barTx,1,axis=1)-barTx) / dy
-            elif grady:
-                barTy = .5*(np.roll(T,1,axis=1)+T)
-                T = (np.roll(barTy,1,axis=2)-np.roll(barTy,-1,axis=2)) / (dx+np.roll(dx,-1,axis=1))
         else:
-            T = 1e-2 * (self.nc[varname].roll( nlon=roll ).values[:, 
-                                                  jmin_bound:jmax_bound+100, imin_bound:imax_bound+100])
+            raise ValueError('The field you prescribed does not exist')
+
 
         #############
         # step 3: figure out if there is too much land in the box
         #############
-        #if crossspec or advt:
-            #mask_domain_P = ( mask.roll( nlon=roll ).values[jmin_bound:jmax_bound+100, 
-            #                                         imin_bound:imax_bound+100] + np.isnan(P[0]) )
-            #region_mask_P = mask_domain_P[jmin:jmax, imin:imax]
-        if advt or varname == 'V1_1' or varname == 'U1_1':
-            mask_domain_U = ( maskU.roll( nlon=roll ).values[jmin_bound:jmax_bound+100, 
+        mask_domain = ( mask.roll( nlon=roll ).values[jmin_bound:jmax_bound+100, 
                                                 imin_bound:imax_bound+100] )
-            region_mask_U = mask_domain_U[jmin:jmax, imin:imax]
-
-        mask_domain_T = ( mask.roll( nlon=roll ).values[jmin_bound:jmax_bound+100, 
-                                                imin_bound:imax_bound+100] )
-        region_mask_T = mask_domain_T[jmin:jmax, imin:imax] 
-        
-        if varname == 'V1_1' or varname == 'U1_1':
-            land_fraction = region_mask_U.sum().astype('f8') / (Ny*Nx)
-        else:
-            land_fraction = region_mask_T.sum().astype('f8') / (Ny*Nx)
+        region_mask = mask_domain[jmin:jmax, imin:imax] 
+        land_fraction = region_mask.sum().astype('f8') / (Ny*Nx)
         
         if land_fraction == 0.:
             # no problem
@@ -932,277 +907,18 @@ class POPFile(object):
         #dl = np.diff(l)[0]*.5/np.pi
         k = fft.fftshift(fft.fftfreq(Nx, dx_domain[Ny/2,Nx/2]))
         l = fft.fftshift(fft.fftfreq(Ny, dy_domain[Ny/2,Nx/2]))
-        dk = np.diff(k)[0]
-        dl = np.diff(l)[0]
 
         ###################################
         ###  Start looping through each time step  ####
         ###################################
         Nt = T.shape[0]
-        spac2_sum = np.zeros((Ny, Nx))
-        tilde2_sum = np.zeros((Ny, Nx))
-        if advt:
-            tilde2_sum_P = np.zeros((Ny, Nx))
-            spac2_sum_P = np.zeros((Ny, Nx))
-            tilde2_sum_Q = np.zeros((Ny, Nx))
-            spac2_sum_Q = np.zeros((Ny, Nx))
         Days = np.arange(daystart, Nt, daylag)
         Neff = len(Days)
         
-        #nday = 0
-        for n in Days:
-            if varname == 'SST' or varname == 'SSS':
-                Ti = np.ma.masked_invalid( np.ma.masked_array(T[n, jmin:jmax, imin:imax].copy(), region_mask_T) )
-            else:
-                Ti = np.ma.masked_invalid( np.ma.masked_array(T[n, jmin:jmax, imin:imax].copy(), region_mask_U) )
-            
-            if advt: 
-                Ui = np.ma.masked_invalid( 
-                     np.ma.masked_array(U[n, jmin:jmax, imin:imax].copy(), region_mask_U) )
-                Vi = np.ma.masked_invalid( 
-                     np.ma.masked_array(V[n, jmin:jmax, imin:imax].copy(), region_mask_U) )
-                geoui = np.ma.masked_invalid(
-                    np.ma.masked_array(geoU[n, jmin:jmax, imin:imax].copy(), region_mask_U) )
-                geovi = np.ma.masked_invalid(
-                    np.ma.masked_array(geoV[n, jmin:jmax, imin:imax].copy(), region_mask_U) )
-                dxui = np.ma.masked_invalid( 
-                    np.ma.masked_array(dxu[jmin:jmax, imin:imax].copy(), region_mask_U) )
-                dyui = np.ma.masked_invalid(
-                    np.ma.masked_array(dyu[jmin:jmax, imin:imax].copy(), region_mask_U) )
-                tareai = np.ma.masked_invalid(
-                    np.ma.masked_array(tarea[jmin:jmax, imin:imax].copy(), region_mask_T) )
-                if self.hconst is None:
-                    Hmli = np.ma.masked_invalid( 
-                        np.ma.masked_array(Hml[n, jmin:jmax, imin:imax].copy(), region_mask_T) )
-              
-            elif tend:
-                if tendname == 'Tdiss' or tendname == 'Sdiss':
-                    Pi = np.ma.masked_invalid( np.ma.masked_array(
-                            P[n, jmin:jmax, imin:imax].copy(), region_mask_T) )
-                else:
-                    Pi = np.ma.masked_invalid( np.ma.masked_array(
-                            P[n, jmin:jmax, imin:imax].copy(), region_mask_U) )
-                #nday += 1
-                #if np.isnan(Pi).any():
-                    #print 'The tendency field includes NANs'
-
-                    #sys.exit()
-            
-            # step 5: interpolate the missing data (only if necessary)
-            if land_fraction>0. and land_fraction<MAX_LAND:
-                Ti = interpolate_2d(Ti)
-                
-                if advt:
-                    Ui = interpolate_2d(Ui)
-                    Vi = interpolate_2d(Vi)
-                    geoui = interpolate_2d(geoui)
-                    geovi = interpolate_2d(geovi)
-                    tareai = interpolate_2d(tareai)
-                    if self.hconst is None:
-                        Hmli = interpolate_2d(Hmli)
-                    dxui = interpolate_2d(dxui)
-                    dyui = interpolate_2d(dyui)
-                
-                elif tend:
-                    if Pi.size != 0:
-                        Pi = interpolate_2d(Pi)
-                    else:
-                        warnings.warn('Pi is a zero-size array')
-                        break
-                        #if np.isnan(Pi).any():
-                            #print 'The tendency field includes NANs after interpolating'
-
-                        #sys.exit()
-            elif land_fraction==0.:
-            # no problem
-                pass
-            else:
-                break
-            
-            ###############
-            # step 6: detrend the data in two dimensions (least squares plane fit)
-            ###############
-            if advt:
-                Tp = detrend_2d(Ti.copy())
-                Tb = Ti.copy() - Tp.copy()
-                Up = Ui.copy() - geoui.copy()
-                #Ub = Ui.copy() - Up.copy()
-                Vp = Vi.copy() - geovi.copy()
-                #Vb = Vi.copy() - Vp.copy()
-                dyuub = geoui.copy() * dyui.copy()
-                dxuvb = geovi.copy() * dxui.copy()
-                dyuup = Up.copy() * dyui.copy()
-                dxuvp = Vp.copy() * dxui.copy()
-                #################
-                # variance production with tracer advection scheme in POP Reference
-                #################
-                Pi = .5**2 * ( (dyuub + np.roll(dyuub, 1, axis=0)) * (np.roll(Tp, -1, axis=1) + Tp) 
-                          - (np.roll(dyuub, 1, axis=1) + np.roll(np.roll(dyuub, 1, axis=0), 1, axis=1)) * (Tp + np.roll(Tp, 1, axis=1))
-                         + (dxuvb + np.roll(dxuvb, 1, axis=1)) * (np.roll(Tp, -1, axis=0) + Tp)
-                          - (np.roll(dxuvb, 1, axis=0) + np.roll(np.roll(dxuvb, 1, axis=0), 1, axis=1)) * (Tp + np.roll(Tp, 1, axis=0))
-                         ) * tareai**-1 * Hmli
-                Qi = .5**2 * ( (dyuup + np.roll(dyuup, 1, axis=0)) * (np.roll(Tb, -1, axis=1) + Tb) 
-                          - (np.roll(dyuup, 1, axis=1) + np.roll(np.roll(dyuup, 1, axis=1), 1, axis=0)) * (Tb + np.roll(Tb, 1, axis=1))
-                         + (dxuvp + np.roll(dxuvp, 1, axis=1)) * (np.roll(Tb, -1, axis=0) + Tb)
-                          - (np.roll(dxuvp, 1, axis=0) + np.roll(np.roll(dxuvp, 1, axis=1), 1, axis=0)) * (Tb + np.roll(Tb, 1, axis=0))
-                         ) * tareai**-1 * Hmli
-                
-                if np.isnan(Pi).any() or np.isnan(Qi).any():
-                    print 'The tendency field has NANs'
-                
-                if detrend:
-                    Pi = detrend_2d(Pi) 
-                    Qi = detrend_2d(Qi)
-                    if demean:
-                        Pi -= Pi.mean()
-                        Qi -= Qi.mean()
-                else:
-                    Pi -= Pi.mean()
-                    Qi -= Qi.mean()
-                
-                if np.isnan(np.asarray(np.ma.masked_invalid(Pi))).any() == True or np.isnan(np.asarray(np.ma.masked_invalid(Qi))).any() == True:
-                    print 'Pi or Qi has invalid numbers'
-                    break
-                
-            elif tend:
-                if detrend:
-                    Pi = detrend_2d(Pi)
-                    #if np.isnan(Pi).any():
-                        #print 'The tendency field includes NANs after detrending'
-                        #sys.exit()
-                    if demean:
-                        Pi -= Pi.mean()
-                else:
-                    # subtract the spatial mean
-                    Pi -= Pi.mean()
-                    #if np.isnan(Pi).any():
-                        #print 'The tendency field includes NANs after demeaning'
-                        #sys.exit()
-            
-            Ti = detrend_2d(Ti)
-            if demean:
-                Ti -= Ti.mean()
-
-            ############
-            # step 7: window the data
-            # Hanning window
-            ############
-            windowx = sig.hann(Nx)
-            windowy = sig.hann(Ny)
-            window = windowx*windowy[:,np.newaxis] 
-            Ti *= window
-            #if np.isnan(Ti).any():
-                #print 'The tracer field includes NANs after windowing'
-            if advt:
-                Pi *= window
-                Qi *= window
-                
-            elif tend:
-                Pi *= window
-                #if np.isnan(Pi).any():
-                    #print 'The tendency field includes NANs after windowing'
-                    #sys.exit()
-            
-            # Aggregate the spatial variance
-            if advt:
-                spac2_sum_P += Ti * Pi
-                spac2_sum_Q += Ti * Qi
-                
-            elif tend:
-                spac2_sum += Ti * Pi
-                #if np.isnan(spac2_sum).any():
-                    #print 'The spac2 includes NANs'
-            else:
-                spac2_sum += Ti**2
-
-            #############
-            # step 8: do the FFT for each timestep and aggregate the results
-            #############
-            Tif = fft.fftshift(fft.fft2(Ti))    # [u^2] (u: unit)
-            #if np.isnan(Tif).any():
-                #print 'The tracer field includes NANs after FFT'
-
-            if advt:
-                Pif = fft.fftshift(fft.fft2(Pi)) 
-                Qif = fft.fftshift(fft.fft2(Qi)) 
-                tilde2_sum_P += np.real(np.conj(Tif) * Pif)
-                tilde2_sum_Q += np.real(np.conj(Tif) * Qif)
-                
-            elif tend:
-                Pif = fft.fftshift(fft.fft2(Pi)) 
-                if np.isnan(Pif).any():
-                    errstr = 'The tendency field (Pif) includes NANs after FFT'
-                    warnings.warn(errstr)
-                    #sys.exit()
-                tilde2_sum += np.real(np.conj(Tif) * Pif)
-                #if np.isnan(tilde2_sum).any():
-                    #print 'The tilde2 includes NANs'
-
-            else:
-                tilde2_sum += np.real(Tif*np.conj(Tif))
-            
-
-        # step 9: check whether the Plancherel theorem is satisfied
-        #tilde2_ave = tilde2_sum/Nt
-        if advt:
-            tilde2_sum = tilde2_sum_P + tilde2_sum_Q
-            spac2_sum = spac2_sum_P + spac2_sum_Q
-            breve2_sum = tilde2_sum / ((Nx*Ny)**2*dk*dl)  
-        else:
-            breve2_sum = tilde2_sum/((Nx*Ny)**2*dk*dl)  
-        #if np.isnan(breve2_sum).any():
-            #print 'The breve2 includes NANs'
-
-        #breve2_ave = tilde2_ave/((Nx*Ny)**2*dk*dl)
-        #spac2_ave = Ti2_sum/Nt
-        kk, ll = np.meshgrid(k, l)
-        K = np.sqrt( kk**2 + ll**2 )
-        #Ki = np.linspace(0, k.max(), nbins)
-        if k.max() > l.max():
-            Ki = np.linspace(0, l.max(), nbins)
-        else:
-            Ki = np.linspace(0, k.max(), nbins)
-        deltaKi = np.diff(Ki)[0]
-        Kidx = np.digitize(K.ravel(), Ki)
-        invalid = Kidx[-1]
-        area = np.bincount(Kidx)
-                
-        if np.isnan(tilde2_sum).any():
-            nanarray = np.zeros(nbins)
-            nanarray[:] = np.nan
-            isotropic_PSD = nanarray
-        else:
-            if land_fraction == 0.:
-                #np.testing.assert_almost_equal(breve2_ave.sum()/(dx_domain[Ny/2,Nx/2]*dy_domain[Ny/2,Nx/2]*(spac2_ave).sum()), 1., decimal=5)
-                np.testing.assert_almost_equal( breve2_sum.sum() 
-                                               / ( dx_domain[Ny/2, Nx/2] * dy_domain[Ny/2, Nx/2] * (spac2_sum).sum() ), 1., decimal=5)
-            
-            # step 10: derive the isotropic spectrum
-            # PREVIOUS: isotropic_PSD = np.ma.masked_invalid(
-            #                               np.bincount(Kidx, weights=breve2_sum.ravel()) / area )[:-1] *Ki*2.*np.pi**2
-            iso_wv = np.ma.masked_invalid(
-                                       np.bincount(Kidx, weights=K.ravel()) / area )
-            isotropic_PSD = np.ma.masked_invalid(
-                                       np.bincount(Kidx, weights=breve2_sum.ravel()) / area ) * iso_wv
-
-        # Usage of digitize
-        #>>> x = np.array([-0.2, 6.4, 3.0, 1.6, 20.])
-        #>>> bins = np.array([0.0, 1.0, 2.5, 4.0, 10.0])
-        #>>> inds = np.digitize(x, bins)
-        #array([0, 4, 3, 2, 5])
-        
-        # Usage of bincount 
-        #>>> np.bincount(np.array([0, 1, 1, 3, 2, 1, 7]))
-        #array([1, 3, 1, 1, 0, 0, 0, 1])
-        # With the option weight
-        #>>> w = np.array([0.3, 0.5, 0.2, 0.7, 1., -0.6]) # weights
-        #>>> x = np.array([0, 1, 1, 2, 2, 2])
-        #>>> np.bincount(x,  weights=w)
-        #array([ 0.3,  0.7,  1.1])  <- [0.3, 0.5+0.2, 0.7+1.-0.6]
-        
-        # step 10: return the results
-        #PREVIOUS: return Neff, Nt, Nx, Ny, k, l, Ti2_sum, tilde2_sum, breve2_sum, Ki, isotropic_PSD, area[1:], lon, lat, land_fraction, MAX_LAND
-        return Neff, Nt, Nx, Ny, k, l, spac2_sum, tilde2_sum, breve2_sum, iso_wv, isotropic_PSD[:], area[:-1], land_fraction, MAX_LAND
+        if len(args) == 1:
+            return _spectra(T, Days, k, l, mask, MAX_LAND, nbins, demean)
+        elif len(args) == 1:
+            return _cross_spectra(T, P, Days, k, l, mask, MAX_LAND, nbins, demean)
         
     def structure_function(self, varname='SST', lonname='TLONG', latname='TLAT', maskname='KMT', dxname='DXT', dyname='DYT', lonrange=(154.9,171.7), latrange=(30,45.4), roll=-1000, q=2, MAX_LAND=0.01, Decor_lag = 13, xmin=0, xmax=0, ymin=0, ymax=0, ymin_bound=0, ymax_bound=0, xmin_bound=0, xmax_bound=0, detre=True, windw=True, iso=False, roll_param=True):
         """Calculate a structure function of Matlab variable 'varname'
@@ -1434,7 +1150,7 @@ class POPFile(object):
 
         return Neff, Nt, dx_cen, dy_cen, L, Hi, Hj, lon, lat, land_fraction, MAX_LAND
     
-def interpolate_2d(Ti):
+def _interpolate_2d(Ti):
     """Interpolate a 2D field
     """
     Ny, Nx = Ti.shape
@@ -1454,7 +1170,7 @@ def interpolate_2d(Ti):
     
     return Znew
  
-def detrend_2d(Ti):
+def _detrend_2d(Ti):
     """Detrend a 2D field.
         Linear plane fit.
     """
