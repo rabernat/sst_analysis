@@ -560,7 +560,7 @@ class POPFile(object):
             # step 5: interpolate the missing data (only if necessary)
             ##############
             if land_fraction > 0. and land_fraction < MAX_LAND:
-                Ti = _interpolate_2d(Ti)
+                Ti = interpolate_2d(Ti)
             elif land_fraction==0.:
                 # no problem
                 pass
@@ -570,7 +570,7 @@ class POPFile(object):
             ###############
             # step 6: detrend the data in two dimensions (least squares plane fit)
             ###############
-            Ti = _detrend_2d(Ti)
+            Ti = detrend_2d(Ti)
             if demean:
                 Ti -= Ti.mean()
 
@@ -689,24 +689,28 @@ class POPFile(object):
     #         print n
             Ti = np.ma.masked_invalid( np.ma.masked_array(T[n].copy(), mask) )
             Pi = np.ma.masked_invalid( np.ma.masked_array(P[n].copy(), mask) )
+            maskP = Pi.mask
 
             ##############
             # step 5: interpolate the missing data (only if necessary)
             ##############
             if land_fraction > 0. and land_fraction < MAX_LAND:
-                Ti = _interpolate_2d(Ti)
-                Pi = _interpolate_2d(Pi)
+                Ti = interpolate_2d(Ti)
             elif land_fraction==0.:
-                # no problem
                 pass
             else:
                 break
-
+            
+            NyP, NxP = maskP.shape
+            land_fractionP = maskP.sum().astype('f8') / (NyP*NxP)
+            if land_fractionP > 0. and land_fractionP < MAX_LAND:
+                Pi = interpolate_2d(Pi)
+            
             ###############
             # step 6: detrend the data in two dimensions (least squares plane fit)
             ###############
-            Ti = _detrend_2d(Ti)
-            Pi = _detrend_2d(Pi)
+            Ti = detrend_2d(Ti)
+            Pi = detrend_2d(Pi)
             if demean:
                 Ti -= Ti.mean()
                 Pi -= Pi.mean()
@@ -720,21 +724,21 @@ class POPFile(object):
             window = windowx*windowy[:,np.newaxis] 
             Ti *= window
             Pi *= window
-
+            
             spac2_sum += Ti*Pi
 
             #############
             # step 8: do the FFT for each timestep and aggregate the results
             #############
             Tif = fft.fftshift(fft.fft2(Ti))    # [u^2] (u: unit)
-            Pif = fft.fftshift(fft.fft2(Pi)) 
-
+            Pif = fft.fftshift(fft.fft2(Pi))
+            
             tilde2_sum += np.real(Tif*np.conj(Pif))
 
-            #############
-            # step 9: check whether the Plancherel theorem is satisfied
-            #############
-            #tilde2_ave = tilde2_sum/Nt
+        #############
+        # step 9: check whether the Plancherel theorem is satisfied
+        #############
+        #tilde2_ave = tilde2_sum/Nt
         breve2_sum = tilde2_sum/((Nx*Ny)**2*dk*dl)  
 
         kk, ll = np.meshgrid(k, l)
@@ -882,7 +886,7 @@ class POPFile(object):
         ###################################
         Nt = T.shape[0]
         Days = np.arange(daystart, Nt, daylag)
-        Neff = len(Days)
+        #Neff = len(Days)
         Ti = T[:, jmin:jmax, imin:imax].copy()
         
         if len(args) == 1:
@@ -1121,7 +1125,7 @@ class POPFile(object):
 
         return Neff, Nt, dx_cen, dy_cen, L, Hi, Hj, lon, lat, land_fraction, MAX_LAND
     
-def _interpolate_2d(Ti):
+def interpolate_2d(Ti):
     """Interpolate a 2D field
     """
     Ny, Nx = Ti.shape
@@ -1141,7 +1145,7 @@ def _interpolate_2d(Ti):
     
     return Znew
  
-def _detrend_2d(Ti):
+def detrend_2d(Ti):
     """Detrend a 2D field.
         Linear plane fit.
     """
